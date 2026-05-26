@@ -1,0 +1,55 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+env/
+
+# 参照音声（個人ファイル・リポジトリに含めない）
+# voice_samples/ フォルダに配置してください（README 参照）
+voice_samples/*.wav
+voice_samples/*.mp3
+voice_samples/*.flac
+# ルート直下にある場合も除外
+ai.wav
+meru.wav
+*.wav
+*.mp3
+*.flac
+
+# プロジェクト出力物（生成ファイルは個人データ）
+chunks/
+exports/
+manifest.json
+script_table.json
+
+# テスト・開発用ファイル（個人利用）
+test_script.md
+*.test.md
+
+# OS
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+Thumbs.db
+ehthumbs.db
+desktop.ini
+
+# エディタ
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# ログ
+*.log
+logs/

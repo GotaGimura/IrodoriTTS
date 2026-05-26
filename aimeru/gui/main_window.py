@@ -1,0 +1,571 @@
+"""
+AiMeru Voice Studio - メインウィンドウ
+
+4タブ構成:
+  Tab 0: プロジェクト設定
+  Tab 1: 話者設定
+  Tab 2: 台本プレビュー
+  Tab 3: 生成キュー
+"""
+from __future__ import annotations
+import logging
+import random
+from pathlib import Path
+from typing import List, Optional
+
+from PySide6.QtWidgets import (
+    QMainWindow, QTabWidget, QWidget, QVBoxLayout, QHBoxLayout,
+    QFormLayout, QGroupBox, QLabel, QLineEdit, QPushButton,
+    QFileDialog, QMessageBox, QDoubleSpinBox, QSpinBox,
+    QCheckBox, QComboBox, QTableWidget, QTableWidgetItem,
+    QHeaderView, QSizePolicy, QStatusBar,
+)
+from PySide6.QtCore import Qt, QThread, QTimer
+from PySide6.QtGui import QFont
+
+from ..models import (
+    ProjectSettings, SpeakerConfig, ScriptItem,
+    STATUS_PENDING, STATUS_HTTP_ERROR, STATUS_SERVER_UNAVAILABLE,
+    STATUS_VOICE_NOT_FOUND, STATUS_FILE_ERROR, STATUS_TOO_SHORT,
+    STATUS_TOO_LONG, STATUS_MANUAL_NG, STATUS_SUCCESS,
+)
+from ..parser import parse_script
+from ..adapter import IrodoriAdapter
+from ..manifest import save_script_table, save_manifest, load_manifest, restore_statuses_from_manifest
+from ..mixer import create_full_mix
+from .preview_tab import PreviewTab
+from .gen_tab import GenTab
+from .worker import GenerationWorker, HealthWorker
+from ..voice_checker import check_voice_file
+
+logger = logging.getLogger(__name__)
+
+APP_TITLE = "AiMeru Voice Studio"
+WINDOW_W, WINDOW_H = 1000, 720
+
+
+class MainWindow(QMainWindow):
+    def __init__(self):
+        super().__init__()
+        self.setWindowTitle(APP_TITLE)
+        self.resize(WINDOW_W, WINDOW_H)
+
+        self.settings = ProjectSettings()
+        self.items: List[ScriptItem] = []
+        self._worker: Optional[GenerationWorker] = None
+        self._health_worker: Optional[HealthWorker] = None
+
+        self._setup_ui()
+        self._connect_signals()
+
+        # 起動後 0.8s で自動ヘルスチェック
+        QTimer.singleShot(800, self._auto_health_check)
+
+    # ==================================================================
+    # UI 構築
+    # ==================================================================
+    def _setup_ui(self):
+        self.tabs = QTabWidget()
+        self.setCentralWidget(self.tabs)
+
+        self.tab_project  = self._build_project_tab()
+        self.tab_speaker  = self._build_speaker_tab()
+        self.preview_tab  = PreviewTab()
+        self.gen_tab      = GenTab()
+
+        self.tabs.addTab(self.tab_project, "⚙ プロジェクト設定")
+        self.tabs.addTab(self.tab_speaker, "🎤 話者設定")
+        self.tabs.addTab(self.preview_tab, "📄 台本プレビュー")
+        self.tabs.addTab(self.gen_tab,     "▶ 生成キュー")
+
+        self.status_bar = QStatusBar()
+        self.setStatusBar(self.status_bar)
+        self.status_bar.showMessage("準備完了")
+
+    # ------------------------------------------------------------------
+    # Tab 0: プロジェクト設定
+    # ------------------------------------------------------------------
+    def _build_project_tab(self) -> QWidget:
+        w = QWidget()
+        outer = QVBoxLayout(w)
+        outer.setContentsMargins(12, 12, 12, 12)
+
+        # ---- プロジェクト情報 ------------------------------------------
+        grp_proj = QGroupBox("プロジェクト情報")
+        form_proj = QFormLayout(grp_proj)
+        self.ed_project_name = QLineEdit(self.settings.project_name)
+        form_proj.addRow("プロジェクト名:", self.ed_project_name)
+        outer.addWidget(grp_proj)
+
+        # ---- ファイルパス ----------------------------------------------
+        grp_files = QGroupBox("ファイル・フォルダ")
+        form_files = QFormLayout(grp_files)
+
+        # 台本 Markdown
+        row_script = QHBoxLayout()
+        self.ed_script = QLineEdit()
+        self.ed_script.setPlaceholderText("台本 Markdown ファイルを選択…")
+        btn_script = QPushButton("参照")
+        btn_script.clicked.connect(self._browse_script)
+        row_script.addWidget(self.ed_script)
+        row_script.addWidget(btn_script)
+        form_files.addRow("台本 Markdown:", row_script)
+
+        # 出力フォルダ
+        row_out = QHBoxLayout()
+        self.ed_output = QLineEdit()
+        self.ed_output.setPlaceholderText("出力フォルダを選択…")
+        btn_out = QPushButton("参照")
+        btn_out.clicked.connect(self._browse_output)
+        row_out.addWidget(self.ed_output)
+        row_out.addWidget(btn_out)
+        form_files.addRow("出力フォルダ:", row_out)
+        outer.addWidget(grp_files)
+
+        # ---- サーバー設定 -----------------------------------------------
+        grp_server = QGroupBox("Irodori-TTS-Server")
+        form_server = QFormLayout(grp_server)
+        self.ed_server_url = QLineEdit(self.settings.server_url)
+        btn_health = QPushButton("接続確認")
+        btn_health.clicked.connect(self._check_health)
+        row_server = QHBoxLayout()
+        row_server.addWidget(self.ed_server_url)
+        row_server.addWidget(btn_health)
+        form_server.addRow("Server URL:", row_server)
+        self.lbl_health = QLabel("（未確認）")
+        form_server.addRow("", self.lbl_health)
+        outer.addWidget(grp_server)
+
+        # ---- 詳細パラメータ ---------------------------------------------
+        grp_adv = QGroupBox("詳細パラメータ（推論）")
+        form_adv = QFormLayout(grp_adv)
+
+        self.sp_num_steps = QSpinBox()
+        self.sp_num_steps.setRange(1, 200)
+        self.sp_num_steps.setValue(self.settings.num_steps)
+        form_adv.addRow("num_steps:", self.sp_num_steps)
+
+        self.sp_cfg_text = QDoubleSpinBox()
+        self.sp_cfg_text.setRange(0.1, 20.0)
+        self.sp_cfg_text.setSingleStep(0.1)
+        self.sp_cfg_text.setValue(self.settings.cfg_scale_text)
+        form_adv.addRow("cfg_scale_text:", self.sp_cfg_text)
+
+        self.sp_cfg_speaker = QDoubleSpinBox()
+        self.sp_cfg_speaker.setRange(0.1, 20.0)
+        self.sp_cfg_speaker.setSingleStep(0.1)
+        self.sp_cfg_speaker.setValue(self.settings.cfg_scale_speaker)
+        form_adv.addRow("cfg_scale_speaker:", self.sp_cfg_speaker)
+
+        self.sp_project_seed = QSpinBox()
+        self.sp_project_seed.setRange(0, 2**30)
+        self.sp_project_seed.setValue(self.settings.project_seed)
+        self.sp_project_seed.setSingleStep(1)
+        form_adv.addRow("project_seed:", self.sp_project_seed)
+
+        self.cb_seed_mode = QComboBox()
+        self.cb_seed_mode.addItems(["deterministic", "random"])
+        form_adv.addRow("seed_mode:", self.cb_seed_mode)
+
+        self.sp_chunk_min = QSpinBox()
+        self.sp_chunk_min.setRange(10, 500)
+        self.sp_chunk_min.setValue(self.settings.chunk_min_chars)
+        form_adv.addRow("chunk_min_chars:", self.sp_chunk_min)
+
+        self.sp_pause_ms = QSpinBox()
+        self.sp_pause_ms.setRange(0, 5000)
+        self.sp_pause_ms.setValue(self.settings.mix_pause_ms)
+        self.sp_pause_ms.setSuffix(" ms")
+        form_adv.addRow("台詞間ポーズ:", self.sp_pause_ms)
+
+        outer.addWidget(grp_adv)
+
+        # ---- 台本読み込みボタン -----------------------------------------
+        btn_load = QPushButton("📂 台本を読み込んでプレビューを更新")
+        btn_load.setStyleSheet("font-weight:bold; padding:6px;")
+        btn_load.clicked.connect(self._load_script)
+        outer.addWidget(btn_load)
+        outer.addStretch()
+
+        return w
+
+    # ------------------------------------------------------------------
+    # Tab 1: 話者設定
+    # ------------------------------------------------------------------
+    def _build_speaker_tab(self) -> QWidget:
+        w = QWidget()
+        outer = QVBoxLayout(w)
+        outer.setContentsMargins(12, 12, 12, 12)
+
+        label = QLabel(
+            "各話者の voice ID と読み上げ速度補正（duration scale）を設定します。\n"
+            "speed は自動計算されます（speed = 1 / duration_scale）。"
+        )
+        label.setWordWrap(True)
+        outer.addWidget(label)
+
+        # ---- 藍 -------------------------------------------------------
+        self._ai_widgets   = self._build_speaker_form(outer, "藍 (ai)",   "ai")
+        # ---- 芽瑠 -------------------------------------------------------
+        self._meru_widgets = self._build_speaker_form(outer, "芽瑠 (meru)", "meru")
+
+        # デフォルト値を設定
+        ai   = self.settings.speakers["ai"]
+        meru = self.settings.speakers["meru"]
+        self._ai_widgets["voice"].setText(ai.voice_id)
+        self._ai_widgets["scale"].setValue(ai.duration_scale_intent)
+        self._ai_widgets["speed"].setText(f"{ai.server_speed:.4f}")
+        self._ai_widgets["voice_file"].setText(ai.voice_file_path)
+        self._meru_widgets["voice"].setText(meru.voice_id)
+        self._meru_widgets["scale"].setValue(meru.duration_scale_intent)
+        self._meru_widgets["speed"].setText(f"{meru.server_speed:.4f}")
+        self._meru_widgets["voice_file"].setText(meru.voice_file_path)
+
+        outer.addStretch()
+        return w
+
+    def _build_speaker_form(self, parent_layout, title: str, speaker_id: str) -> dict:
+        grp = QGroupBox(title)
+        form = QFormLayout(grp)
+
+        voice_ed = QLineEdit()
+        form.addRow("voice ID:", voice_ed)
+
+        scale_sp = QDoubleSpinBox()
+        scale_sp.setRange(0.1, 4.0)
+        scale_sp.setSingleStep(0.01)
+        scale_sp.setDecimals(3)
+        scale_sp.setValue(1.0)
+        form.addRow("duration scale:", scale_sp)
+
+        speed_lbl = QLineEdit()
+        speed_lbl.setReadOnly(True)
+        speed_lbl.setStyleSheet("background:#f0f0f0;")
+        form.addRow("server speed（自動）:", speed_lbl)
+
+        def _update_speed(v):
+            speed_lbl.setText(f"{1.0/v:.4f}" if v > 0 else "—")
+
+        scale_sp.valueChanged.connect(_update_speed)
+
+        # ── 参照音声ファイル ─────────────────────────────────
+        row_vf = QHBoxLayout()
+        voice_file_ed = QLineEdit()
+        voice_file_ed.setPlaceholderText("参照音声 WAV ファイルを選択…")
+        btn_browse_vf = QPushButton("参照")
+        btn_browse_vf.setFixedWidth(56)
+        btn_browse_vf.clicked.connect(lambda: self._browse_voice_file(speaker_id))
+        row_vf.addWidget(voice_file_ed)
+        row_vf.addWidget(btn_browse_vf)
+        form.addRow("参照音声:", row_vf)
+
+        btn_check_vf = QPushButton("🔍 音声チェック実行")
+        btn_check_vf.clicked.connect(lambda: self._run_voice_check(speaker_id))
+        form.addRow("", btn_check_vf)
+
+        lbl_check_result = QLabel("（未チェック）")
+        lbl_check_result.setWordWrap(True)
+        lbl_check_result.setTextFormat(Qt.TextFormat.RichText)
+        lbl_check_result.setStyleSheet("color:#888; font-size:11px; padding:2px 0;")
+        form.addRow("チェック結果:", lbl_check_result)
+
+        parent_layout.addWidget(grp)
+        return {
+            "voice": voice_ed,
+            "scale": scale_sp,
+            "speed": speed_lbl,
+            "voice_file": voice_file_ed,
+            "check_result": lbl_check_result,
+        }
+
+    # ==================================================================
+    # シグナル接続
+    # ==================================================================
+    def _connect_signals(self):
+        self.gen_tab.set_callbacks(
+            on_all      = self._generate_all,
+            on_selected = self._generate_selected,
+            on_failed   = self._generate_failed,
+            on_ng       = self._generate_ng,
+            on_stop     = self._stop_generation,
+            on_remix    = self._remix_only,
+        )
+        # プレビュータブの選択件数を生成タブのボタンにリアルタイム反映
+        self.preview_tab.selection_changed.connect(
+            lambda indices: self.gen_tab.set_selected_count(len(indices))
+        )
+
+    # ==================================================================
+    # 設定収集
+    # ==================================================================
+    def _collect_settings(self):
+        s = self.settings
+        s.project_name    = self.ed_project_name.text().strip() or "my_project"
+        s.script_path     = self.ed_script.text().strip()
+        s.output_dir      = self.ed_output.text().strip()
+        s.server_url      = self.ed_server_url.text().strip().rstrip("/")
+        s.num_steps       = self.sp_num_steps.value()
+        s.cfg_scale_text  = self.sp_cfg_text.value()
+        s.cfg_scale_speaker = self.sp_cfg_speaker.value()
+        s.project_seed    = self.sp_project_seed.value()
+        s.seed_mode       = self.cb_seed_mode.currentText()
+        s.chunk_min_chars = self.sp_chunk_min.value()
+        s.mix_pause_ms    = self.sp_pause_ms.value()
+        s.create_full_mix = self.gen_tab.create_mix
+
+        # 話者設定
+        ai_scale   = self._ai_widgets["scale"].value()
+        meru_scale = self._meru_widgets["scale"].value()
+        s.speakers["ai"].voice_id               = self._ai_widgets["voice"].text().strip() or "ai"
+        s.speakers["ai"].duration_scale_intent  = ai_scale
+        s.speakers["ai"].voice_file_path        = self._ai_widgets["voice_file"].text().strip()
+        s.speakers["meru"].voice_id             = self._meru_widgets["voice"].text().strip() or "meru"
+        s.speakers["meru"].duration_scale_intent = meru_scale
+        s.speakers["meru"].voice_file_path      = self._meru_widgets["voice_file"].text().strip()
+
+    # ==================================================================
+    # アクション
+    # ==================================================================
+    def _browse_script(self):
+        path, _ = QFileDialog.getOpenFileName(
+            self, "台本 Markdown を選択", "", "Markdown (*.md);;All files (*)"
+        )
+        if path:
+            self.ed_script.setText(path)
+
+    def _browse_output(self):
+        path = QFileDialog.getExistingDirectory(self, "出力フォルダを選択")
+        if path:
+            self.ed_output.setText(path)
+
+    def _auto_health_check(self):
+        """起動直後に非同期でヘルスチェックを実行する（① 自動チェック）。"""
+        self._collect_settings()
+        self._health_worker = HealthWorker(self.settings, parent=self)
+        self._health_worker.result.connect(self._on_health_result)
+        self._health_worker.start()
+
+    def _on_health_result(self, ok: bool, msg: str):
+        if ok:
+            self.lbl_health.setText(f"✅ {msg}")
+            self.lbl_health.setStyleSheet("color:green;")
+            self.status_bar.showMessage("サーバー接続OK（自動チェック）")
+        else:
+            self.lbl_health.setText(f"❌ {msg}")
+            self.lbl_health.setStyleSheet("color:red;")
+            self.status_bar.showMessage("サーバー未応答（自動チェック）— URL を確認してください")
+
+    def _check_health(self):
+        self._collect_settings()
+        adapter = IrodoriAdapter(self.settings)
+        ok, msg = adapter.health_check()
+        if ok:
+            self.lbl_health.setText(f"✅ {msg}")
+            self.lbl_health.setStyleSheet("color:green;")
+            self.status_bar.showMessage("サーバー接続OK")
+        else:
+            self.lbl_health.setText(f"❌ {msg}")
+            self.lbl_health.setStyleSheet("color:red;")
+            self.status_bar.showMessage("サーバー接続失敗")
+
+    # ------------------------------------------------------------------
+    # ② 参照音声チェック
+    # ------------------------------------------------------------------
+    def _browse_voice_file(self, speaker_id: str):
+        """話者の参照音声 WAV ファイルをファイルダイアログで選択する。"""
+        path, _ = QFileDialog.getOpenFileName(
+            self, "参照音声 WAV を選択", "", "WAV (*.wav);;All files (*)"
+        )
+        if not path:
+            return
+        widgets = self._ai_widgets if speaker_id == "ai" else self._meru_widgets
+        widgets["voice_file"].setText(path)
+        # 選択直後に自動でチェックを実行
+        self._run_voice_check(speaker_id)
+
+    def _run_voice_check(self, speaker_id: str):
+        """参照音声の品質チェックを実行し、結果を HTML ラベルに反映する。"""
+        widgets = self._ai_widgets if speaker_id == "ai" else self._meru_widgets
+        path = widgets["voice_file"].text().strip()
+        result = check_voice_file(path)
+        lbl: QLabel = widgets["check_result"]
+        lbl.setText(result.summary_html())
+        lbl.setStyleSheet("font-size:11px; padding:2px 0;")
+
+    def _load_script(self):
+        self._collect_settings()
+        script_path = self.settings.script_path
+        if not script_path:
+            QMessageBox.warning(self, "エラー", "台本 Markdown ファイルを指定してください。")
+            return
+        try:
+            text = Path(script_path).read_text(encoding="utf-8")
+        except Exception as e:
+            QMessageBox.critical(self, "読み込みエラー", str(e))
+            return
+
+        self.items = parse_script(text, self.settings)
+        if not self.items:
+            QMessageBox.warning(self, "パース結果なし",
+                                "台本から台詞を抽出できませんでした。\n"
+                                "フォーマット: 「藍：台詞」または「芽瑠：台詞」")
+            return
+
+        # 既存 manifest があればステータスを復元
+        if self.settings.output_dir:
+            manifest_path = Path(self.settings.output_dir) / "manifest.json"
+            manifest = load_manifest(manifest_path)
+            if manifest:
+                restore_statuses_from_manifest(self.items, manifest)
+
+        self.preview_tab.load_items(self.items)
+        self.tabs.setCurrentIndex(2)   # プレビュータブへ
+        self.status_bar.showMessage(f"{len(self.items)} 行の台詞を読み込みました")
+
+        # script_table.json 保存
+        if self.settings.output_dir:
+            try:
+                save_script_table(
+                    self.items, self.settings,
+                    Path(self.settings.output_dir) / "script_table.json"
+                )
+            except Exception as e:
+                logger.warning("script_table.json 保存失敗: %s", e)
+
+    # ==================================================================
+    # 生成アクション
+    # ==================================================================
+    def _validate_before_generate(self) -> bool:
+        self._collect_settings()
+        if not self.items:
+            QMessageBox.warning(self, "エラー", "台本を先に読み込んでください。")
+            return False
+        if not self.settings.output_dir:
+            QMessageBox.warning(self, "エラー", "出力フォルダを指定してください。")
+            return False
+        return True
+
+    def _generate_all(self):
+        if not self._validate_before_generate():
+            return
+        self._start_worker(self.items)
+
+    def _generate_selected(self):
+        if not self._validate_before_generate():
+            return
+        targets = self.preview_tab.get_selected_items()
+        if not targets:
+            # 未選択のときはプレビュータブへ自動的に切り替えて案内
+            self.tabs.setCurrentIndex(2)
+            self.status_bar.showMessage(
+                "行を選択してください（クリック or Shift+クリック or Cmd+クリック）"
+            )
+            return
+        self._start_worker(targets)
+
+    def _generate_failed(self):
+        if not self._validate_before_generate():
+            return
+        failed_statuses = {
+            STATUS_HTTP_ERROR, STATUS_SERVER_UNAVAILABLE,
+            STATUS_VOICE_NOT_FOUND, STATUS_FILE_ERROR,
+            STATUS_TOO_SHORT, STATUS_TOO_LONG,
+        }
+        targets = [it for it in self.items if it.status in failed_statuses]
+        if not targets:
+            QMessageBox.information(self, "対象なし", "失敗行がありません。")
+            return
+        self._start_worker(targets)
+
+    def _generate_ng(self):
+        if not self._validate_before_generate():
+            return
+        targets = [it for it in self.items if it.status == STATUS_MANUAL_NG]
+        if not targets:
+            QMessageBox.information(self, "対象なし", "手動NG 行がありません。")
+            return
+        self._start_worker(targets)
+
+    def _stop_generation(self):
+        if self._worker and self._worker.isRunning():
+            self._worker.stop()
+            self.gen_tab.append_log("⛔ 停止リクエスト送信…")
+
+    def _remix_only(self):
+        if not self._validate_before_generate():
+            return
+        out_dir = Path(self.settings.output_dir)
+        success_files = [
+            str(out_dir / it.file)
+            for it in self.items
+            if it.status == STATUS_SUCCESS and it.file
+        ]
+        if not success_files:
+            QMessageBox.warning(self, "エラー", "成功した音声ファイルがありません。")
+            return
+        self.gen_tab.append_log("🎵 full_mix.wav を再作成中…")
+        mix_path = out_dir / "exports" / "full_mix.wav"
+        ok, err = create_full_mix(
+            success_files, mix_path, pause_ms=self.settings.mix_pause_ms
+        )
+        if ok:
+            self.gen_tab.append_log(f"  ✅ full_mix.wav 生成完了 → {mix_path}")
+            self.status_bar.showMessage(f"full_mix.wav 生成完了")
+        else:
+            self.gen_tab.append_log(f"  ❌ 失敗: {err}")
+
+    # ==================================================================
+    # ワーカー起動
+    # ==================================================================
+    def _start_worker(self, targets: list):
+        if self._worker and self._worker.isRunning():
+            QMessageBox.warning(self, "生成中", "生成が既に実行中です。停止してから再試行してください。")
+            return
+
+        self._collect_settings()
+        out_dir = Path(self.settings.output_dir)
+        self.settings.create_full_mix = self.gen_tab.create_mix
+        skip = self.gen_tab.skip_existing
+
+        self.gen_tab.clear_log()
+        self.gen_tab.reset_progress()
+        self.gen_tab.set_generating(True)
+        self.tabs.setCurrentIndex(3)
+        self.gen_tab.append_log(f"🚀 生成開始: {len(targets)} 行 / skip_existing={skip}")
+
+        self._worker = GenerationWorker(
+            items        = targets,
+            settings     = self.settings,
+            output_dir   = out_dir,
+            all_items    = self.items,
+            skip_existing= skip,
+            parent       = self,
+        )
+        self._worker.item_started.connect(self._on_item_started)
+        self._worker.item_done.connect(self._on_item_done)
+        self._worker.log_message.connect(self.gen_tab.append_log)
+        self._worker.progress.connect(self.gen_tab.set_progress)
+        self._worker.mix_done.connect(self._on_mix_done)
+        self._worker.all_done.connect(self._on_all_done)
+        self._worker.start()
+
+    # ==================================================================
+    # ワーカーシグナルハンドラ
+    # ==================================================================
+    def _on_item_started(self, index: int):
+        self.preview_tab.update_item_status(index, "generating")
+
+    def _on_item_done(self, index: int, status: str, error: str):
+        self.preview_tab.update_item_status(index, status, error)
+
+    def _on_mix_done(self, ok: bool, msg: str):
+        if ok:
+            self.status_bar.showMessage(f"full_mix.wav: {msg}")
+        else:
+            self.status_bar.showMessage(f"full_mix エラー: {msg}")
+
+    def _on_all_done(self):
+        self.gen_tab.set_generating(False)
+        success_count = sum(1 for it in self.items if it.status == STATUS_SUCCESS)
+        self.gen_tab.append_log(f"\n✨ 完了 ({success_count}/{len(self.items)} 成功)")
+        self.status_bar.showMessage(f"生成完了: {success_count}/{len(self.items)} 成功")
