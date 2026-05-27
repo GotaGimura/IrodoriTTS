@@ -1,11 +1,19 @@
 @echo off
-REM AiMeru Voice Studio 起動スクリプト (Windows)
+chcp 65001 >nul
+setlocal EnableExtensions
 cd /d "%~dp0"
 
-if not exist ".venv\Scripts\python.exe" (
-    echo [ERROR] 仮想環境が見つかりません。先に setup.bat を実行してください。
+set "VENV_PY=.venv\Scripts\python.exe"
+
+if not exist "%VENV_PY%" (
+    echo [ERROR] Virtual environment was not found.
+    echo         Run setup.bat first.
     pause
     exit /b 1
 )
 
-.venv\Scripts\python.exe main.py %*
+echo Starting AiMeru Voice Studio GUI...
+echo Note: this GUI expects an OpenAI-compatible Irodori-TTS API server, usually http://localhost:8088.
+echo       The Gradio UIs are separate: http://localhost:7860 and http://localhost:7861.
+"%VENV_PY%" main.py %*
+exit /b %errorlevel%

@@ -1,190 +1,258 @@
 # AiMeru Voice Studio
 
-藍 (ai) と 芽瑠 (meru) の掛け合いスクリプトを WAV 音声に変換する PySide6 デスクトップアプリケーションです。  
-バックエンドに [Irodori-TTS-Server](https://github.com/Aratako/Irodori-TTS)（OpenAI 互換 TTS API）を使用します。
+AiMeru Voice Studio is a local desktop GUI for preparing scripts, sending them to an OpenAI-compatible Irodori-TTS API server, and collecting generated WAV files.
 
----
+This repository is the AiMeru GUI. It does not by itself guarantee that the Irodori-TTS synthesis server is running.
 
-## 動作要件
+## Roles and URLs
 
-| 項目 | 要件 |
-|------|------|
-| OS | macOS 12 以上 / Windows 10 以上 |
-| Python | 3.11 以上 |
-| Irodori-TTS-Server | 別途起動が必要（後述） |
+| URL | Role | Started by |
+| --- | --- | --- |
+| `http://localhost:8088` | OpenAI-compatible Irodori-TTS API server used by AiMeru GUI (`/health`, `/v1/audio/speech`) | Irodori-TTS server command, separate from this GUI |
+| `http://localhost:7860` | Irodori-TTS TTS v3 Gradio UI | `gradio_app.py` in the external Irodori-TTS checkout |
+| `http://localhost:7861` | Irodori-TTS VoiceDesign Gradio UI | `gradio_app_voicedesign.py` in the external Irodori-TTS checkout |
 
----
+Important: starting `run.bat` only starts the AiMeru GUI. It may still show a connection failure until an API server is running on `http://localhost:8088`.
 
-## セットアップ手順
+## Windows Quick Start
 
-### 1. リポジトリをクローン
-
-```bash
-git clone <このリポジトリの URL>
+```bat
+cd D:\LocalAI\AiMeruVoice
+git clone https://github.com/GotaGimura/IrodoriTTS.git
 cd IrodoriTTS
+.\setup.bat
+.\run_server.bat
+.\run.bat
 ```
 
-### 2. セットアップスクリプトを実行
+`setup.bat` creates `.venv`, upgrades pip using `.venv\Scripts\python.exe -m pip`, and installs `requirements.txt`.
 
-**macOS / Linux:**
+## Start The AiMeru GUI
 
-```bash
-chmod +x setup.sh
-./setup.sh
+```bat
+cd D:\LocalAI\AiMeruVoice\IrodoriTTS
+.\run.bat
 ```
 
-**Windows:**
+The GUI default server URL is `http://localhost:8088`. This is for the OpenAI-compatible TTS API server, not the Gradio UI.
 
-`setup.bat` をダブルクリック、またはコマンドプロンプトで実行。
+## Start The Local API Server
 
-セットアップスクリプトは次のことを行います:
-- Python 3.11 以上の確認
-- `.venv/` 仮想環境の作成
-- 依存ライブラリのインストール
+Start this in a separate terminal before using generation from AiMeru Voice Studio:
 
-### 3. 参照音声ファイルを配置
-
-`voice_samples/` フォルダを作成し、参照音声 WAV ファイルを配置してください。  
-**これらのファイルはリポジトリには含まれません（.gitignore で除外されています）。**
-
-```
-voice_samples/
-  ai.wav    ← 藍の参照音声（10〜30 秒推奨、モノラル WAV）
-  meru.wav  ← 芽瑠の参照音声（10〜30 秒推奨、モノラル WAV）
+```bat
+cd D:\LocalAI\AiMeruVoice\IrodoriTTS
+.\run_server.bat
 ```
 
-> ファイル名は任意です。アプリの「話者設定」タブでパスを指定できます。
+The server binds to `127.0.0.1:8088` by default. Health check:
 
-### 4. Irodori-TTS-Server を起動
-
-別のターミナルで Irodori-TTS-Server を起動します。  
-サーバーのセットアップは [Irodori-TTS リポジトリ](https://github.com/Aratako/Irodori-TTS) を参照してください。
-
-```bash
-# Irodori-TTS のディレクトリで
-uv run uvicorn irodori_openai_tts.app:app --host 127.0.0.1 --port 8088
+```bat
+curl http://127.0.0.1:8088/health
+netstat -ano | findstr :8088
 ```
 
-### 5. AiMeru Voice Studio を起動
+AiMeru GUI needs both processes:
 
-**macOS / Linux:**
-
-```bash
-./run.sh
+```bat
+.\run_server.bat
+.\run.bat
 ```
 
-**Windows:**
+Starting the GUI alone does not start the synthesis API server.
 
-`run.bat` をダブルクリック、またはコマンドプロンプトで実行。
+## Start Irodori-TTS Gradio UI
 
----
+The Irodori-TTS application itself is expected to be cloned separately. On this Windows machine, the expected path is:
 
-## 使い方
-
-1. **プロジェクト設定タブ** で台本 Markdown ファイルと出力フォルダを指定
-2. **話者設定タブ** で voice ID と参照音声ファイルを設定
-3. **プロジェクト設定タブ** の「台本を読み込んでプレビューを更新」をクリック
-4. **台本プレビュータブ** で内容を確認
-5. **生成キュータブ** で生成を開始
-
-### 台本フォーマット
-
-```markdown
-藍：こんにちは、藍です。
-芽瑠：はじめまして、芽瑠です！
-
-藍：今日はどうぞよろしく。
-芽瑠：こちらこそ、よろしくお願いします。
+```bat
+C:\Users\koben\Dev\Irodori-TTS
 ```
 
----
+Manual start commands:
 
-## ファイル構成
-
-```
-IrodoriTTS/
-├── aimeru/                 # アプリケーション本体
-│   ├── gui/                # PySide6 GUI
-│   ├── adapter.py          # Irodori-TTS-Server HTTP クライアント
-│   ├── models.py           # データモデル
-│   ├── parser.py           # Markdown パーサー
-│   ├── mixer.py            # WAV ミキサー
-│   ├── manifest.py         # プロジェクト状態の保存/読み込み
-│   └── voice_checker.py    # 参照音声品質チェッカー
-├── voice_samples/          # 参照音声置き場 (git 除外)
-├── main.py                 # エントリーポイント
-├── launch_gradio.py        # Gradio UI ランチャー
-├── setup.sh                # セットアップ (macOS/Linux)
-├── setup.bat               # セットアップ (Windows)
-├── run.sh                  # 起動 (macOS/Linux)
-├── run.bat                 # 起動 (Windows)
-└── requirements.txt        # 依存ライブラリ
+```bat
+cd C:\Users\koben\Dev\Irodori-TTS
+uv run python gradio_app.py --server-name 127.0.0.1 --server-port 7860
+uv run python gradio_app_voicedesign.py --server-name 127.0.0.1 --server-port 7861
 ```
 
-### 出力ファイル（git 除外）
+From this repository, you can also use:
 
-```
-<出力フォルダ>/
-├── chunks/          # 台詞ごとの WAV ファイル
-├── exports/
-│   └── full_mix.wav # 全台詞を結合した最終 WAV
-├── manifest.json    # 生成状態の記録
-└── script_table.json
+```bat
+cd D:\LocalAI\AiMeruVoice\IrodoriTTS
+.\launch_gradio.bat
 ```
 
----
+`launch_gradio.bat` checks for the external checkout and starts both Gradio UIs through `uv run`. It does not clone repositories automatically. If your checkout is somewhere else, use either:
 
-## Gradio UI ランチャー
-
-Irodori-TTS の Gradio UI（声のデザインや TTS v3 直接操作）を起動できます。
-
-```bash
-python launch_gradio.py          # 両方起動
-python launch_gradio.py --v3     # TTS v3 のみ
-python launch_gradio.py --vd     # VoiceDesign のみ
-python launch_gradio.py --no-browser  # ブラウザ自動起動なし
+```bat
+set IRODORI_TTS_DIR=C:\path\to\Irodori-TTS
+.\launch_gradio.bat
 ```
 
-> **セキュリティ:** デフォルトは `127.0.0.1`（ローカルのみ）です。  
-> LAN に公開する場合は `--network` フラグを追加してください（信頼できるネットワークのみ）。
+or:
 
----
-
-## セキュリティについて
-
-- **参照音声ファイル（WAV）は `.gitignore` で除外されています。**  
-  音声データは個人のものです。誤ってリポジトリに含めないよう注意してください。
-- **出力ファイル（chunks/, exports/, manifest.json）も除外されています。**  
-  生成物に台詞テキストが含まれる場合は取り扱いに注意してください。
-- **サーバー URL はデフォルト `http://localhost:8088`（ローカルのみ）です。**  
-  外部サーバーを指定する場合は信頼できる接続（VPN など）を使用してください。
-- **Gradio UI はデフォルトでローカルのみに公開されます。**  
-  `--network` フラグによる外部公開は信頼できるネットワーク内でのみ行ってください。
-
----
-
-## トラブルシューティング
-
-### 「サーバーに接続できません」と表示される
-
-Irodori-TTS-Server が起動しているか確認してください。  
-プロジェクト設定タブの「接続確認」ボタンでテストできます。
-
-### 音声が再生されない (macOS)
-
-macOS では `afplay` コマンドを使用します。通常 OS 標準で含まれています。  
-問題が続く場合はターミナルで `afplay --version` を確認してください。
-
-### 音声が再生されない (Windows)
-
-PySide6 の QMediaPlayer を使用しています。  
-`PySide6-Addons` が正しくインストールされているか確認してください。
-
-```bash
-.venv\Scripts\pip install PySide6-Addons
+```bat
+.\launch_gradio.bat --repo-dir C:\path\to\Irodori-TTS
 ```
 
-### `ModuleNotFoundError: No module named 'aimeru'`
+Useful options:
 
-`main.py` があるディレクトリから実行してください。  
-`run.sh` / `run.bat` を使うと正しいディレクトリから起動されます。
+```bat
+.\launch_gradio.bat --v3
+.\launch_gradio.bat --vd
+.\launch_gradio.bat --no-browser
+```
+
+## Local-Only Security Default
+
+Gradio is launched with `--server-name 127.0.0.1` by default. This means it is reachable only from the local machine.
+
+Do not bind Gradio or API servers to `0.0.0.0` by default. If you really need LAN access, use the explicit flag:
+
+```bat
+.\launch_gradio.bat --network
+.\run_server.bat --network
+```
+
+This binds the selected service to `0.0.0.0` and prints a warning. Use it only on a trusted network.
+
+## API Server For AiMeru GUI
+
+AiMeru GUI sends synthesis requests to:
+
+```text
+POST http://localhost:8088/v1/audio/speech
+GET  http://localhost:8088/health
+```
+
+If the GUI says it cannot connect to `http://localhost:8088`, the OpenAI-compatible API server is probably not running. The Gradio UI on `7860` or `7861` is separate and does not replace the `8088` API endpoint.
+
+This repository provides a local FastAPI bridge:
+
+```bat
+.\run_server.bat
+```
+
+The bridge calls the external Irodori-TTS checkout at `C:\Users\koben\Dev\Irodori-TTS` through `uv run --no-sync python infer.py`. `--no-sync` is intentional: after installing a CUDA-enabled PyTorch build, plain `uv run` may sync from `pyproject.toml` / `uv.lock` and move the environment back to a CPU torch build.
+
+You can override the path:
+
+```bat
+set IRODORI_TTS_DIR=C:\path\to\Irodori-TTS
+.\run_server.bat
+```
+
+Voice IDs are mapped to local reference files in `voice_samples\`. For example, `voice=ai` uses `voice_samples\ai.wav` when present. You can also override per voice:
+
+```bat
+set IRODORI_VOICE_AI_WAV=D:\voices\ai.wav
+set IRODORI_VOICE_MERU_WAV=D:\voices\meru.wav
+```
+
+The default Hugging Face checkpoint is `Aratako/Irodori-TTS-500M-v3`. Override it if needed:
+
+```bat
+set IRODORI_TTS_CHECKPOINT=Aratako/Irodori-TTS-500M-v3
+```
+
+## Check Which Ports Are Running
+
+```bat
+netstat -ano | findstr :8088
+netstat -ano | findstr :7860
+netstat -ano | findstr :7861
+```
+
+Expected meaning:
+
+- `:8088` is the API server for AiMeru GUI generation.
+- `:7860` is the TTS v3 Gradio UI.
+- `:7861` is the VoiceDesign Gradio UI.
+
+## CUDA / RTX 4090 Check
+
+For this AiMeru GUI virtual environment:
+
+```bat
+.\.venv\Scripts\python.exe -c "import torch; print(torch.cuda.is_available()); print(torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'CUDA not available')"
+```
+
+For the external Irodori-TTS checkout when using `uv`:
+
+```bat
+uv run --no-sync python -c "import torch; print(torch.__version__); print(torch.version.cuda); print(torch.cuda.is_available()); print(torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'CUDA not available')"
+```
+
+Expected RTX 4090 result:
+
+```text
+2.11.0+cu128
+12.8
+True
+NVIDIA GeForce RTX 4090
+```
+
+You can also check through the AiMeru API server while `run_server.bat` is running:
+
+```bat
+curl http://127.0.0.1:8088/debug/cuda
+```
+
+If `cuda_available` is `false`, the environment may have CPU-only PyTorch installed or CUDA may not be visible. In that case, install the CUDA-enabled PyTorch build that matches the Irodori-TTS project and your driver/CUDA setup. Do this deliberately in the target environment only; do not remove or reinstall packages blindly.
+
+If the AiMeru GUI environment prints `ModuleNotFoundError: No module named 'torch'`, that only means this GUI venv does not install PyTorch. The most important check is usually the external Irodori-TTS `uv run --no-sync python ...` command, because that is the environment that performs model inference.
+
+During generation, watch GPU use with:
+
+```bat
+nvidia-smi
+```
+
+## Voice Samples And Generated Files
+
+Reference voice files and generated audio can contain private data. Do not commit them.
+
+The repository keeps only:
+
+```text
+voice_samples/.gitkeep
+```
+
+Ignored examples include:
+
+```text
+voice_samples/*.wav
+voice_samples/*.mp3
+voice_samples/*.m4a
+outputs/
+*.log
+.env
+.env.*
+```
+
+## Troubleshooting
+
+### `setup.bat` fails while upgrading pip
+
+Use the venv Python module form, not `pip.exe` directly:
+
+```bat
+.\.venv\Scripts\python.exe -m pip install --quiet --upgrade pip
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
+```
+
+The included `setup.bat` already uses this form.
+
+### GUI starts but cannot connect to server
+
+Start or verify the API server on `http://localhost:8088`, then click the GUI connection check again.
+
+```bat
+netstat -ano | findstr :8088
+```
+
+### Gradio starts but GUI still cannot generate
+
+This is expected if only ports `7860` / `7861` are running. AiMeru GUI generation uses the API server on `8088`.

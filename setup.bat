@@ -1,100 +1,127 @@
 @echo off
-REM =============================================================================
-REM  AiMeru Voice Studio — セットアップスクリプト (Windows)
-REM
-REM  実行方法: このファイルをダブルクリック、または
-REM            コマンドプロンプトで setup.bat を実行
-REM =============================================================================
-setlocal EnableDelayedExpansion
+chcp 65001 >nul
+setlocal EnableExtensions EnableDelayedExpansion
 cd /d "%~dp0"
 
+set "VENV_DIR=.venv"
+set "VENV_PY=%VENV_DIR%\Scripts\python.exe"
+
 echo ==============================================
-echo   AiMeru Voice Studio — セットアップ
+echo   AiMeru Voice Studio setup for Windows
 echo ==============================================
 echo.
 
-REM ── 1. Python バージョン確認 ──────────────────────────
-set PYTHON=
+call :find_python
+if errorlevel 1 exit /b 1
+
+if exist "%VENV_PY%" (
+    echo [OK] Virtual environment already exists: %VENV_DIR%
+    "%VENV_PY%" -c "import sys; print(sys.executable)" >nul 2>&1
+    if errorlevel 1 (
+        echo [WARN] Existing virtual environment is not runnable. Repairing it with the detected Python.
+        call %PYTHON_CMD% -m venv --upgrade "%VENV_DIR%"
+        if errorlevel 1 (
+            echo [ERROR] Failed to repair the existing virtual environment.
+            echo         If this venv was copied from another machine, remove .venv and run setup.bat again.
+            pause
+            exit /b 1
+        )
+    )
+) else (
+    echo [..] Creating virtual environment: %VENV_DIR%
+    call %PYTHON_CMD% -m venv "%VENV_DIR%"
+    if errorlevel 1 (
+        echo [ERROR] Failed to create virtual environment.
+        echo         Check that Python 3.11+ is installed and available on PATH.
+        pause
+        exit /b 1
+    )
+)
+
+if not exist "%VENV_PY%" (
+    echo [ERROR] Virtual environment Python was not found: %VENV_PY%
+    pause
+    exit /b 1
+)
+
+echo [..] Upgrading pip with venv Python
+"%VENV_PY%" -m pip install --quiet --upgrade pip
+if errorlevel 1 (
+    echo [ERROR] Failed to upgrade pip.
+    echo         Retry manually:
+    echo         %VENV_PY% -m pip install --upgrade pip
+    pause
+    exit /b 1
+)
+
+echo [..] Installing requirements
+"%VENV_PY%" -m pip install --quiet -r requirements.txt
+if errorlevel 1 (
+    echo [ERROR] Failed to install requirements.txt.
+    echo         Check your network connection and the error messages above.
+    pause
+    exit /b 1
+)
+
+echo.
+echo [OK] Python dependencies are ready.
+echo.
+echo Reference voice files:
+if exist "voice_samples\ai.wav" (
+    echo [OK] voice_samples\ai.wav found
+) else (
+    echo [INFO] voice_samples\ai.wav not found
+)
+if exist "voice_samples\meru.wav" (
+    echo [OK] voice_samples\meru.wav found
+) else (
+    echo [INFO] voice_samples\meru.wav not found
+)
+echo.
+echo Next:
+echo   run_server.bat       starts the local API server on 127.0.0.1:8088
+echo   run.bat              starts AiMeru Voice Studio GUI
+echo   launch_gradio.bat    starts Irodori-TTS Gradio UI, if the external repo exists
+echo.
+pause
+exit /b 0
+
+:find_python
+set "PYTHON_CMD="
+set "PYTHON_VER="
+
 for %%P in (python3.13 python3.12 python3.11 python3 python) do (
     where %%P >nul 2>&1
-    if !errorlevel! == 0 (
-        for /f "tokens=*" %%V in ('%%P -c "import sys; v=sys.version_info; ok=v.major>=3 and v.minor>=11; print(f'{v.major}.{v.minor}.{v.micro}' if ok else '')"') do (
-            if not "%%V"=="" (
-                set PYTHON=%%P
-                set PYTHON_VER=%%V
-                goto :found_python
+    if not errorlevel 1 (
+        %%P -c "import sys; raise SystemExit(0 if sys.version_info >= (3, 11) else 1)" >nul 2>&1
+        if not errorlevel 1 (
+            for /f "usebackq delims=" %%V in (`%%P -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}')"` ) do (
+                set "PYTHON_CMD=%%P"
+                set "PYTHON_VER=%%V"
+                goto :python_found
             )
         )
     )
 )
 
-echo [ERROR] Python 3.11 以上が見つかりません。
-echo         https://www.python.org/downloads/ からインストールしてください。
-echo         インストール時に "Add Python to PATH" にチェックを入れてください。
-pause
-exit /b 1
-
-:found_python
-echo [OK]  Python %PYTHON_VER% (%PYTHON%)
-
-REM ── 2. 仮想環境の作成 ──────────────────────────────────
-if exist ".venv\" (
-    echo [OK]  仮想環境: 既存 (.venv\)
-) else (
-    echo [....] 仮想環境を作成中...
-    %PYTHON% -m venv .venv
-    if errorlevel 1 (
-        echo [ERROR] 仮想環境の作成に失敗しました。
-        pause
-        exit /b 1
+where py >nul 2>&1
+if not errorlevel 1 (
+    for %%V in (3.13 3.12 3.11) do (
+        py -%%V -c "import sys; raise SystemExit(0 if sys.version_info >= (3, 11) else 1)" >nul 2>&1
+        if not errorlevel 1 (
+            set "PYTHON_CMD=py -%%V"
+            for /f "usebackq delims=" %%R in (`py -%%V -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}')"` ) do set "PYTHON_VER=%%R"
+            goto :python_found
+        )
     )
-    echo [OK]  仮想環境を作成しました (.venv\)
 )
 
-REM ── 3. pip アップグレード + 依存インストール ────────────
-echo [....] 依存ライブラリをインストール中...
-.venv\Scripts\pip.exe install --quiet --upgrade pip
-if errorlevel 1 goto :pip_error
-.venv\Scripts\pip.exe install --quiet -r requirements.txt
-if errorlevel 1 goto :pip_error
-echo [OK]  インストール完了
-goto :after_pip
-
-:pip_error
-echo [ERROR] ライブラリのインストールに失敗しました。
-echo         ネットワーク接続を確認してください。
+echo [ERROR] Python 3.11 or newer was not found.
+echo         Install Python from https://www.python.org/downloads/
+echo         Enable "Add Python to PATH" during installation.
 pause
 exit /b 1
 
-:after_pip
-
-REM ── 4. voice_samples\ の確認 ──────────────────────────
-echo.
-echo -- 参照音声ファイルについて ----------------------------
-if exist "voice_samples\ai.wav" (
-    echo [OK]  voice_samples\ai.wav   -- 検出済み
-) else (
-    echo [WARN] voice_samples\ai.wav が見つかりません
-)
-if exist "voice_samples\meru.wav" (
-    echo [OK]  voice_samples\meru.wav -- 検出済み
-) else (
-    echo [WARN] voice_samples\meru.wav が見つかりません
-    echo        Irodori-TTS-Server に登録している音声ファイルを
-    echo        voice_samples\ フォルダに配置してください。
-    echo        （ファイル名は任意。アプリ内の話者設定で指定します）
-)
-
-REM ── 完了 ──────────────────────────────────────────────
-echo.
-echo ==============================================
-echo   セットアップ完了！
-echo.
-echo   起動方法:
-echo     run.bat
-echo.
-echo   Irodori-TTS-Server は別途起動が必要です。
-echo   詳しくは README.md を参照してください。
-echo ==============================================
-echo.
-pause
+:python_found
+echo [OK] Python %PYTHON_VER% found: %PYTHON_CMD%
+exit /b 0

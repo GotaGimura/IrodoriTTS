@@ -11,27 +11,34 @@ build/
 venv/
 env/
 
-# 参照音声（個人ファイル・リポジトリに含めない）
-# voice_samples/ フォルダに配置してください（README 参照）
+# Private reference voices and generated audio
 voice_samples/*.wav
 voice_samples/*.mp3
+voice_samples/*.m4a
 voice_samples/*.flac
-# ルート直下にある場合も除外
 ai.wav
 meru.wav
 *.wav
 *.mp3
+*.m4a
 *.flac
 
-# プロジェクト出力物（生成ファイルは個人データ）
+# Generated project outputs
 chunks/
 exports/
+outputs/
 manifest.json
 script_table.json
 
-# テスト・開発用ファイル（個人利用）
+# Local test/development files
 test_script.md
 *.test.md
+
+# Logs and environment secrets
+*.log
+logs/
+.env
+.env.*
 
 # OS
 .DS_Store
@@ -43,13 +50,9 @@ Thumbs.db
 ehthumbs.db
 desktop.ini
 
-# エディタ
+# Editors
 .vscode/
 .idea/
 *.swp
 *.swo
 *~
-
-# ログ
-*.log
-logs/
