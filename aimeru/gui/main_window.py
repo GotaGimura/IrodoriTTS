@@ -42,6 +42,7 @@ logger = logging.getLogger(__name__)
 
 APP_TITLE = "AiMeru Voice Studio"
 WINDOW_W, WINDOW_H = 1000, 720
+DEFAULT_OUTPUT_ROOT = Path.home() / "Downloads"
 
 
 class MainWindow(QMainWindow):
@@ -114,7 +115,9 @@ class MainWindow(QMainWindow):
         # 出力フォルダ
         row_out = QHBoxLayout()
         self.ed_output = QLineEdit()
-        self.ed_output.setPlaceholderText("出力フォルダを選択…")
+        self.ed_output.setPlaceholderText(
+            f"未指定時は {DEFAULT_OUTPUT_ROOT / 'chunks'} に保存します"
+        )
         btn_out = QPushButton("参照")
         btn_out.clicked.connect(self._browse_output)
         row_out.addWidget(self.ed_output)
@@ -123,6 +126,9 @@ class MainWindow(QMainWindow):
         btn_open_out = QPushButton("出力フォルダを開く")
         btn_open_out.clicked.connect(self._open_output_folder)
         form_files.addRow("", btn_open_out)
+        self.lbl_default_output = QLabel(f"未指定時の保存先: {DEFAULT_OUTPUT_ROOT / 'chunks'}")
+        self.lbl_default_output.setStyleSheet("color:#666; font-size:11px;")
+        form_files.addRow("", self.lbl_default_output)
         outer.addWidget(grp_files)
 
         # ---- サーバー設定 -----------------------------------------------
@@ -320,7 +326,8 @@ class MainWindow(QMainWindow):
         s = self.settings
         s.project_name    = self.ed_project_name.text().strip() or "my_project"
         s.script_path     = self.ed_script.text().strip()
-        s.output_dir      = self.ed_output.text().strip()
+        output_dir = self.ed_output.text().strip()
+        s.output_dir      = output_dir or str(DEFAULT_OUTPUT_ROOT)
         s.server_url      = self.ed_server_url.text().strip().rstrip("/")
         s.num_steps       = self.sp_num_steps.value()
         s.cfg_scale_text  = self.sp_cfg_text.value()
@@ -364,17 +371,15 @@ class MainWindow(QMainWindow):
 
     def _open_output_folder(self):
         self._collect_settings()
-        if not self.settings.output_dir:
-            QMessageBox.warning(self, "出力フォルダ未設定", "出力フォルダを先に指定してください。")
-            return
-        self._open_folder(Path(self.settings.output_dir), "出力フォルダ")
+        folder = Path(self.settings.output_dir)
+        folder.mkdir(parents=True, exist_ok=True)
+        self._open_folder(folder, "出力フォルダ")
 
     def _open_chunks_folder(self):
         self._collect_settings()
-        if not self.settings.output_dir:
-            QMessageBox.warning(self, "出力フォルダ未設定", "出力フォルダを先に指定してください。")
-            return
-        self._open_folder(Path(self.settings.output_dir) / "chunks", "chunks フォルダ")
+        folder = Path(self.settings.output_dir) / "chunks"
+        folder.mkdir(parents=True, exist_ok=True)
+        self._open_folder(folder, "chunks フォルダ")
 
     def _speaker_widgets(self, speaker_id: str) -> dict:
         return self._ai_widgets if speaker_id == "ai" else self._meru_widgets
@@ -507,6 +512,7 @@ class MainWindow(QMainWindow):
                 restore_statuses_from_manifest(self.items, manifest)
 
         self.preview_tab.load_items(self.items)
+        self._refresh_generated_audio()
         self.tabs.setCurrentIndex(2)   # プレビュータブへ
         self.status_bar.showMessage(f"{len(self.items)} 行の台詞を読み込みました")
 
@@ -527,9 +533,6 @@ class MainWindow(QMainWindow):
         self._collect_settings()
         if not self.items:
             QMessageBox.warning(self, "エラー", "台本を先に読み込んでください。")
-            return False
-        if not self.settings.output_dir:
-            QMessageBox.warning(self, "エラー", "出力フォルダを指定してください。")
             return False
         if not self._validate_reference_audio_paths():
             return False
@@ -614,6 +617,7 @@ class MainWindow(QMainWindow):
 
         self._collect_settings()
         out_dir = Path(self.settings.output_dir)
+        out_dir.mkdir(parents=True, exist_ok=True)
         self.settings.create_full_mix = self.gen_tab.create_mix
         skip = self.gen_tab.skip_existing
 
@@ -661,6 +665,7 @@ class MainWindow(QMainWindow):
 
     def _on_item_done(self, index: int, status: str, error: str):
         self.preview_tab.update_item_status(index, status, error)
+        self._refresh_generated_audio()
 
     def _on_mix_done(self, ok: bool, msg: str):
         if ok:
@@ -671,5 +676,10 @@ class MainWindow(QMainWindow):
     def _on_all_done(self):
         self.gen_tab.set_generating(False)
         success_count = sum(1 for it in self.items if it.status == STATUS_SUCCESS)
+        self._refresh_generated_audio()
         self.gen_tab.append_log(f"\n✨ 完了 ({success_count}/{len(self.items)} 成功)")
         self.status_bar.showMessage(f"生成完了: {success_count}/{len(self.items)} 成功")
+
+    def _refresh_generated_audio(self):
+        output_dir = Path(self.settings.output_dir) if self.settings.output_dir else None
+        self.gen_tab.refresh_generated_audio(self.items, output_dir)

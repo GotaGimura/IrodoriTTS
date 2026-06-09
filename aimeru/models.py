@@ -139,7 +139,7 @@ class ProjectSettings:
     num_steps: int = 40
     cfg_scale_text: float = 3.0
     cfg_scale_speaker: float = 5.0
-    mix_pause_ms: int = 400
+    mix_pause_ms: int = 500
     create_full_mix: bool = True
     speakers: Dict[str, SpeakerConfig] = field(default_factory=dict)
 

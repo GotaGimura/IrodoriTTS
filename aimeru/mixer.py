@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 def create_full_mix(
     wav_files: List[str],
     output_path: Path,
-    pause_ms: int = 400,
+    pause_ms: int = 500,
     progress_cb: Optional[Callable[[int, int], None]] = None,
 ) -> tuple[bool, str]:
     """

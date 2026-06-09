@@ -103,7 +103,37 @@ netstat -ano | findstr :8088
 
 Do not run the old `run_server.bat` at the same time as the resident API on `8088`.
 
-## 8. Git Safety
+## 8. Generated Audio Panel
+
+The generation tab shows generated chunk WAV files after a script is loaded or generation finishes.
+
+Main behavior:
+
+- If no output folder is selected, generated chunks are saved under `Path.home() / "Downloads" / "chunks"`.
+- Existing generated chunk WAV files are listed from the current output directory.
+- Every listed chunk is checked by default.
+- Use `全選択` to check all chunks.
+- Use `全解除` to clear all chunks.
+- Use `再生` on each row to preview that chunk.
+- The global seek bar shows current playback time and can seek within the playing chunk.
+- Starting another chunk stops the previous playback.
+- Use `選択した音声を連結して保存` to choose a save path and write a merged WAV.
+- The merge target is only the checked chunks, in table order.
+- Merged WAV files insert 0.5 seconds of silence between chunks.
+- No silence is added after the final chunk.
+- Individual chunk WAV files and individual chunk preview playback are unchanged.
+- Save location is chosen when the button is pressed; the app does not require an output path for merged WAVs before generation.
+- `full_mix.wav` uses the project `mix_pause_ms` setting. New projects default to 500 ms.
+
+Merge safety:
+
+- Source WAV files must exist.
+- WAV channel count, sample width, frame rate, and compression type must match.
+- Frame count, duration, and file size do not need to match.
+- Silence uses the same channel count, sample width, frame rate, and compression metadata as the merged WAV.
+- If formats do not match, the app shows an error instead of writing a broken merged WAV.
+
+## 9. Git Safety
 
 Use these checks before committing:
 
@@ -121,7 +151,7 @@ voice_samples/.gitkeep
 
 Actual reference audio, generated WAV files, logs, and `.env` files must stay out of Git.
 
-## 9. Related Files
+## 10. Related Files
 
 - `aimeru/adapter.py`
 - `aimeru/gui/main_window.py`

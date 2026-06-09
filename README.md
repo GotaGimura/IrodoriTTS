@@ -179,6 +179,10 @@ When a speaker reference file is selected in the GUI, AiMeru sends it in the API
 
 For the detailed reference audio rules, see `reference.md`.
 
+The generation tab also includes a generated-audio panel for previewing chunk WAV files, selecting chunks, and saving a merged WAV. See `reference.md` for details.
+If the output folder is left blank, chunk WAV files are saved under the current user's `Downloads\chunks` folder.
+Merged WAV saves insert 0.5 seconds of silence between selected chunks, with no trailing silence after the final chunk. Individual chunk files and individual preview playback are not modified.
+
 The default Hugging Face checkpoint is `Aratako/Irodori-TTS-500M-v3`. Override it if needed:
 
 ```bat
