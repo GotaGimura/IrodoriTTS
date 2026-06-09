@@ -13,6 +13,7 @@ This repository is the AiMeru GUI. It does not by itself guarantee that the Irod
 | `http://localhost:7861` | Irodori-TTS VoiceDesign Gradio UI | `gradio_app_voicedesign.py` in the external Irodori-TTS checkout |
 
 Important: starting `run.bat` only starts the AiMeru GUI. It may still show a connection failure until an API server is running on `http://localhost:8088`.
+For normal fast operation, use `start_fast_mode.bat`.
 
 ## Windows Quick Start
 
@@ -21,11 +22,12 @@ cd D:\LocalAI\AiMeruVoice
 git clone https://github.com/GotaGimura/IrodoriTTS.git
 cd IrodoriTTS
 .\setup.bat
-.\run_server.bat
-.\run.bat
+.\start_fast_mode.bat
 ```
 
 `setup.bat` creates `.venv`, upgrades pip using `.venv\Scripts\python.exe -m pip`, and installs `requirements.txt`.
+
+For the current high-speed local workflow, use `start_fast_mode.bat`. It starts or reuses the Irodori-TTS resident API on `127.0.0.1:8088`, waits for `/health`, then starts AiMeru Voice Studio. The older `run_server.bat` bridge is kept as a fallback, but it is not the recommended fast path.
 
 ## Start The AiMeru GUI
 
@@ -34,25 +36,45 @@ cd D:\LocalAI\AiMeruVoice\IrodoriTTS
 .\run.bat
 ```
 
-The GUI default server URL is `http://localhost:8088`. This is for the OpenAI-compatible TTS API server, not the Gradio UI.
+The GUI default server URL is `http://localhost:8088`. This is for the OpenAI-compatible resident TTS API server, not the Gradio UI. Starting the GUI alone does not start the API server.
+
+## Start Fast Resident Mode
+
+Recommended daily startup:
+
+```bat
+cd D:\LocalAI\AiMeruVoice\IrodoriTTS
+.\start_fast_mode.bat
+```
+
+This does the following:
+
+- checks `http://127.0.0.1:8088/health`;
+- starts the external Irodori-TTS resident API from `C:\Users\koben\Dev\Irodori-TTS` if needed;
+- waits until the API is healthy;
+- starts AiMeru Voice Studio.
+
+In fast mode, AiMeru GUI connects to the resident API on `8088`. The test port `8089` is only for verification or fallback experiments.
 
 ## Start The Local API Server
 
-Start this in a separate terminal before using generation from AiMeru Voice Studio:
+This repository still includes the older AiMeru FastAPI bridge:
 
 ```bat
 cd D:\LocalAI\AiMeruVoice\IrodoriTTS
 .\run_server.bat
 ```
 
-The server binds to `127.0.0.1:8088` by default. Health check:
+It calls `infer.py` through subprocess for each request. It is useful as a fallback, but the recommended high-speed path is the external Irodori-TTS resident API via `start_fast_mode.bat`.
+
+The bridge binds to `127.0.0.1:8088` by default. Health check:
 
 ```bat
 curl http://127.0.0.1:8088/health
 netstat -ano | findstr :8088
 ```
 
-AiMeru GUI needs both processes:
+If you use this fallback bridge, AiMeru GUI needs both processes:
 
 ```bat
 .\run_server.bat
@@ -150,6 +172,8 @@ Voice IDs are mapped to local reference files in `voice_samples\`. For example, 
 set IRODORI_VOICE_AI_WAV=D:\voices\ai.wav
 set IRODORI_VOICE_MERU_WAV=D:\voices\meru.wav
 ```
+
+When a speaker reference file is selected in the GUI, AiMeru sends it in the API payload as `reference_audio_path` and `ref_wav`. Compatible resident servers use this explicit path first. If the explicit file path does not exist, the server returns a clear `reference_audio_not_found` error instead of silently falling back to the wrong voice.
 
 The default Hugging Face checkpoint is `Aratako/Irodori-TTS-500M-v3`. Override it if needed:
 

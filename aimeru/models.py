@@ -50,7 +50,7 @@ class SpeakerConfig:
     display_name: str
     voice_id: str
     duration_scale_intent: float = 1.0
-    voice_file_path: str = ""   # 参照音声のローカルパス（チェック用・サーバーには送らない）
+    voice_file_path: str = ""   # Reference audio path sent to compatible local API servers.
 
     @property
     def server_speed(self) -> float:

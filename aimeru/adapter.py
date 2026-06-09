@@ -98,7 +98,7 @@ class IrodoriAdapter:
     # ------------------------------------------------------------------
     def _build_payload(self, item: ScriptItem) -> dict:
         s = self.settings
-        return {
+        payload = {
             "model": s.model,
             "input": item.text,
             "voice": item.voice_id,
@@ -113,3 +113,10 @@ class IrodoriAdapter:
                 "chunk_min_chars": s.chunk_min_chars,
             },
         }
+        speaker = s.speakers.get(item.speaker_id)
+        if speaker is not None:
+            reference_audio_path = speaker.voice_file_path.strip()
+            if reference_audio_path:
+                payload["reference_audio_path"] = reference_audio_path
+                payload["ref_wav"] = reference_audio_path
+        return payload
