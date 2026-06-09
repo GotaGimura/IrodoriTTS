@@ -108,6 +108,16 @@ class GenerationWorker(QThread):
                 f"  🎙 [{item.index:03d}] {item.speaker_name}："
                 f"{item.text[:30]}{'…' if len(item.text) > 30 else ''}"
             )
+            speaker = self.settings.speakers.get(item.speaker_id)
+            if speaker and speaker.voice_file_path.strip():
+                self.log_message.emit(
+                    f"    payload voice={item.voice_id} "
+                    f"reference_audio_path={speaker.voice_file_path.strip()}"
+                )
+            else:
+                self.log_message.emit(
+                    f"    payload voice={item.voice_id} reference_audio_path未設定（server fallback）"
+                )
 
             ok, err = adapter.synthesize(item, file_path)
 

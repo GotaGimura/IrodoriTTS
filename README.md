@@ -29,6 +29,8 @@ cd IrodoriTTS
 
 For the current high-speed local workflow, use `start_fast_mode.bat`. It starts or reuses the Irodori-TTS resident API on `127.0.0.1:8088`, waits for `/health`, then starts AiMeru Voice Studio. The older `run_server.bat` bridge is kept as a fallback, but it is not the recommended fast path.
 
+Reference audio, speaker mapping, payload fields, and Git safety rules are documented in `reference.md`.
+
 ## Start The AiMeru GUI
 
 ```bat
@@ -174,6 +176,8 @@ set IRODORI_VOICE_MERU_WAV=D:\voices\meru.wav
 ```
 
 When a speaker reference file is selected in the GUI, AiMeru sends it in the API payload as `reference_audio_path` and `ref_wav`. Compatible resident servers use this explicit path first. If the explicit file path does not exist, the server returns a clear `reference_audio_not_found` error instead of silently falling back to the wrong voice.
+
+For the detailed reference audio rules, see `reference.md`.
 
 The default Hugging Face checkpoint is `Aratako/Irodori-TTS-500M-v3`. Override it if needed:
 

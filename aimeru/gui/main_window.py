@@ -20,8 +20,8 @@ from PySide6.QtWidgets import (
     QCheckBox, QComboBox, QTableWidget, QTableWidgetItem,
     QHeaderView, QSizePolicy, QStatusBar,
 )
-from PySide6.QtCore import Qt, QThread, QTimer
-from PySide6.QtGui import QFont
+from PySide6.QtCore import Qt, QThread, QTimer, QUrl
+from PySide6.QtGui import QDesktopServices, QFont
 
 from ..models import (
     ProjectSettings, SpeakerConfig, ScriptItem,
@@ -120,6 +120,9 @@ class MainWindow(QMainWindow):
         row_out.addWidget(self.ed_output)
         row_out.addWidget(btn_out)
         form_files.addRow("出力フォルダ:", row_out)
+        btn_open_out = QPushButton("出力フォルダを開く")
+        btn_open_out.clicked.connect(self._open_output_folder)
+        form_files.addRow("", btn_open_out)
         outer.addWidget(grp_files)
 
         # ---- サーバー設定 -----------------------------------------------
@@ -134,6 +137,9 @@ class MainWindow(QMainWindow):
         form_server.addRow("Server URL:", row_server)
         self.lbl_health = QLabel("（未確認）")
         form_server.addRow("", self.lbl_health)
+        self.lbl_api_mode = QLabel(f"API Server: {self.settings.server_url} / Mode: 未確認")
+        self.lbl_api_mode.setStyleSheet("color:#666; font-size:11px;")
+        form_server.addRow("", self.lbl_api_mode)
         outer.addWidget(grp_server)
 
         # ---- 詳細パラメータ ---------------------------------------------
@@ -220,6 +226,8 @@ class MainWindow(QMainWindow):
         self._meru_widgets["scale"].setValue(meru.duration_scale_intent)
         self._meru_widgets["speed"].setText(f"{meru.server_speed:.4f}")
         self._meru_widgets["voice_file"].setText(meru.voice_file_path)
+        self._update_reference_payload_hint("ai")
+        self._update_reference_payload_hint("meru")
 
         outer.addStretch()
         return w
@@ -229,6 +237,7 @@ class MainWindow(QMainWindow):
         form = QFormLayout(grp)
 
         voice_ed = QLineEdit()
+        voice_ed.textChanged.connect(lambda _text: self._update_reference_payload_hint(speaker_id))
         form.addRow("voice ID:", voice_ed)
 
         scale_sp = QDoubleSpinBox()
@@ -252,6 +261,7 @@ class MainWindow(QMainWindow):
         row_vf = QHBoxLayout()
         voice_file_ed = QLineEdit()
         voice_file_ed.setPlaceholderText("参照音声 WAV ファイルを選択…")
+        voice_file_ed.textChanged.connect(lambda _text: self._update_reference_payload_hint(speaker_id))
         btn_browse_vf = QPushButton("参照")
         btn_browse_vf.setFixedWidth(56)
         btn_browse_vf.clicked.connect(lambda: self._browse_voice_file(speaker_id))
@@ -269,6 +279,11 @@ class MainWindow(QMainWindow):
         lbl_check_result.setStyleSheet("color:#888; font-size:11px; padding:2px 0;")
         form.addRow("チェック結果:", lbl_check_result)
 
+        lbl_payload = QLabel("")
+        lbl_payload.setWordWrap(True)
+        lbl_payload.setStyleSheet("color:#666; font-size:11px; padding:2px 0;")
+        form.addRow("payload:", lbl_payload)
+
         parent_layout.addWidget(grp)
         return {
             "voice": voice_ed,
@@ -276,6 +291,7 @@ class MainWindow(QMainWindow):
             "speed": speed_lbl,
             "voice_file": voice_file_ed,
             "check_result": lbl_check_result,
+            "payload": lbl_payload,
         }
 
     # ==================================================================
@@ -289,6 +305,8 @@ class MainWindow(QMainWindow):
             on_ng       = self._generate_ng,
             on_stop     = self._stop_generation,
             on_remix    = self._remix_only,
+            on_open_output = self._open_output_folder,
+            on_open_chunks = self._open_chunks_folder,
         )
         # プレビュータブの選択件数を生成タブのボタンにリアルタイム反映
         self.preview_tab.selection_changed.connect(
@@ -338,6 +356,69 @@ class MainWindow(QMainWindow):
         if path:
             self.ed_output.setText(path)
 
+    def _open_folder(self, folder: Path, label: str):
+        if not folder.exists() or not folder.is_dir():
+            QMessageBox.warning(self, "フォルダが見つかりません", f"{label} が存在しません:\n{folder}")
+            return
+        QDesktopServices.openUrl(QUrl.fromLocalFile(str(folder)))
+
+    def _open_output_folder(self):
+        self._collect_settings()
+        if not self.settings.output_dir:
+            QMessageBox.warning(self, "出力フォルダ未設定", "出力フォルダを先に指定してください。")
+            return
+        self._open_folder(Path(self.settings.output_dir), "出力フォルダ")
+
+    def _open_chunks_folder(self):
+        self._collect_settings()
+        if not self.settings.output_dir:
+            QMessageBox.warning(self, "出力フォルダ未設定", "出力フォルダを先に指定してください。")
+            return
+        self._open_folder(Path(self.settings.output_dir) / "chunks", "chunks フォルダ")
+
+    def _speaker_widgets(self, speaker_id: str) -> dict:
+        return self._ai_widgets if speaker_id == "ai" else self._meru_widgets
+
+    def _update_reference_payload_hint(self, speaker_id: str):
+        if not hasattr(self, "_ai_widgets") or not hasattr(self, "_meru_widgets"):
+            return
+        widgets = self._speaker_widgets(speaker_id)
+        payload_lbl: QLabel | None = widgets.get("payload")
+        if payload_lbl is None:
+            return
+
+        voice_id = widgets["voice"].text().strip() or speaker_id
+        path = widgets["voice_file"].text().strip()
+        if path:
+            exists = Path(path).is_file()
+            color = "green" if exists else "red"
+            exists_text = "true" if exists else "false"
+            payload_lbl.setText(
+                f'<span style="color:{color}">reference_audio_path = {path}<br>'
+                f'exists = {exists_text}</span><br>'
+                f'<span style="color:#666">voice = {voice_id} / ref_wav = same path</span>'
+            )
+        else:
+            payload_lbl.setText(
+                f'<span style="color:#666">reference_audio_path 未設定。'
+                f'生成時は voice={voice_id} のサーバー側fallbackを使用します。</span>'
+            )
+
+    def _validate_reference_audio_paths(self) -> bool:
+        for speaker_id in ("ai", "meru"):
+            widgets = self._speaker_widgets(speaker_id)
+            path = widgets["voice_file"].text().strip()
+            if path and not Path(path).is_file():
+                self.tabs.setCurrentIndex(1)
+                QMessageBox.warning(
+                    self,
+                    "参照音声が見つかりません",
+                    f"{speaker_id} の参照音声ファイルが存在しません:\n{path}\n\n"
+                    "このまま生成すると別の声へfallbackする可能性があるため、生成を止めました。",
+                )
+                return False
+        return True
+
     def _auto_health_check(self):
         """起動直後に非同期でヘルスチェックを実行する（① 自動チェック）。"""
         self._collect_settings()
@@ -349,10 +430,13 @@ class MainWindow(QMainWindow):
         if ok:
             self.lbl_health.setText(f"✅ {msg}")
             self.lbl_health.setStyleSheet("color:green;")
+            mode = "resident" if "Resident" in msg else "bridge/fallback"
+            self.lbl_api_mode.setText(f"API Server: {self.settings.server_url} / Mode: {mode} / Health: OK")
             self.status_bar.showMessage("サーバー接続OK（自動チェック）")
         else:
             self.lbl_health.setText(f"❌ {msg}")
             self.lbl_health.setStyleSheet("color:red;")
+            self.lbl_api_mode.setText(f"API Server: {self.settings.server_url} / Health: NG")
             self.status_bar.showMessage("サーバー未応答（自動チェック）— URL を確認してください")
 
     def _check_health(self):
@@ -362,10 +446,13 @@ class MainWindow(QMainWindow):
         if ok:
             self.lbl_health.setText(f"✅ {msg}")
             self.lbl_health.setStyleSheet("color:green;")
+            mode = "resident" if "Resident" in msg else "bridge/fallback"
+            self.lbl_api_mode.setText(f"API Server: {self.settings.server_url} / Mode: {mode} / Health: OK")
             self.status_bar.showMessage("サーバー接続OK")
         else:
             self.lbl_health.setText(f"❌ {msg}")
             self.lbl_health.setStyleSheet("color:red;")
+            self.lbl_api_mode.setText(f"API Server: {self.settings.server_url} / Health: NG")
             self.status_bar.showMessage("サーバー接続失敗")
 
     # ------------------------------------------------------------------
@@ -388,6 +475,7 @@ class MainWindow(QMainWindow):
         widgets = self._ai_widgets if speaker_id == "ai" else self._meru_widgets
         path = widgets["voice_file"].text().strip()
         result = check_voice_file(path)
+        self._update_reference_payload_hint(speaker_id)
         lbl: QLabel = widgets["check_result"]
         lbl.setText(result.summary_html())
         lbl.setStyleSheet("font-size:11px; padding:2px 0;")
@@ -442,6 +530,8 @@ class MainWindow(QMainWindow):
             return False
         if not self.settings.output_dir:
             QMessageBox.warning(self, "エラー", "出力フォルダを指定してください。")
+            return False
+        if not self._validate_reference_audio_paths():
             return False
         return True
 
@@ -532,6 +622,20 @@ class MainWindow(QMainWindow):
         self.gen_tab.set_generating(True)
         self.tabs.setCurrentIndex(3)
         self.gen_tab.append_log(f"🚀 生成開始: {len(targets)} 行 / skip_existing={skip}")
+        self.gen_tab.append_log(f"API URL: {self.settings.server_url}")
+        for speaker_id, speaker in self.settings.speakers.items():
+            ref_path = speaker.voice_file_path.strip()
+            if ref_path:
+                exists = Path(ref_path).is_file()
+                self.gen_tab.append_log(
+                    f"payload {speaker_id}: voice={speaker.voice_id}, "
+                    f"reference_audio_path={ref_path}, exists={exists}"
+                )
+            else:
+                self.gen_tab.append_log(
+                    f"payload {speaker_id}: voice={speaker.voice_id}, "
+                    "reference_audio_path未設定（server fallback）"
+                )
 
         self._worker = GenerationWorker(
             items        = targets,

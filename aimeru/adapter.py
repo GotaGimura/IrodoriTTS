@@ -35,7 +35,12 @@ class IrodoriAdapter:
         try:
             resp = httpx.get(url, timeout=TIMEOUT_HEALTH)
             if resp.status_code == 200:
-                return True, f"接続OK (HTTP {resp.status_code})"
+                try:
+                    data = resp.json()
+                    service = data.get("service") or "API server"
+                    return True, f"接続OK: {service} (HTTP {resp.status_code})"
+                except Exception:
+                    return True, f"接続OK (HTTP {resp.status_code})"
             else:
                 return False, f"HTTP {resp.status_code}: {resp.text[:200]}"
         except httpx.ConnectError:

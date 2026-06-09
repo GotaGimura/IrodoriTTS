@@ -30,6 +30,8 @@ class GenTab(QWidget):
         self._on_generate_ng:       Optional[Callable] = None
         self._on_stop:              Optional[Callable] = None
         self._on_remix:             Optional[Callable] = None
+        self._on_open_output:       Optional[Callable] = None
+        self._on_open_chunks:       Optional[Callable] = None
         self._setup_ui()
 
     # ------------------------------------------------------------------
@@ -62,14 +64,19 @@ class GenTab(QWidget):
         self.btn_ng       = QPushButton("↩ 手動NG を再生成")
         self.btn_stop     = QPushButton("⛔ 停止")
         self.btn_remix    = QPushButton("🎵 full_mix だけ再作成")
+        self.btn_open_out = QPushButton("📂 出力フォルダ")
+        self.btn_open_chunks = QPushButton("📂 chunks")
 
         self.btn_all.setStyleSheet("background:#4CAF50; color:white; font-weight:bold;")
         self.btn_stop.setStyleSheet("background:#f44336; color:white; font-weight:bold;")
         self.btn_stop.setEnabled(False)
         self.btn_selected.setToolTip("「台本プレビュー」タブで行を選択してからクリック\nCtrl（Mac: Cmd）+ クリックで複数選択")
+        self.btn_open_out.setToolTip("現在の出力フォルダをExplorerで開きます")
+        self.btn_open_chunks.setToolTip("生成された個別WAVの chunks フォルダをExplorerで開きます")
 
         for btn in (self.btn_all, self.btn_selected, self.btn_failed,
-                    self.btn_ng, self.btn_stop, self.btn_remix):
+                    self.btn_ng, self.btn_stop, self.btn_remix,
+                    self.btn_open_out, self.btn_open_chunks):
             btn_layout.addWidget(btn)
 
         layout.addWidget(btn_group)
@@ -107,6 +114,8 @@ class GenTab(QWidget):
         self.btn_ng.clicked.connect(lambda: self._on_generate_ng and self._on_generate_ng())
         self.btn_stop.clicked.connect(self._handle_stop)
         self.btn_remix.clicked.connect(lambda: self._on_remix and self._on_remix())
+        self.btn_open_out.clicked.connect(lambda: self._on_open_output and self._on_open_output())
+        self.btn_open_chunks.clicked.connect(lambda: self._on_open_chunks and self._on_open_chunks())
 
     # ------------------------------------------------------------------
     # 外部から接続するコールバック setter
@@ -115,6 +124,7 @@ class GenTab(QWidget):
         self,
         on_all=None, on_selected=None, on_failed=None,
         on_ng=None, on_stop=None, on_remix=None,
+        on_open_output=None, on_open_chunks=None,
     ):
         self._on_generate_all      = on_all
         self._on_generate_selected = on_selected
@@ -122,6 +132,8 @@ class GenTab(QWidget):
         self._on_generate_ng       = on_ng
         self._on_stop              = on_stop
         self._on_remix             = on_remix
+        self._on_open_output       = on_open_output
+        self._on_open_chunks       = on_open_chunks
 
     # ------------------------------------------------------------------
     # 停止ハンドラ（2重送信防止）
