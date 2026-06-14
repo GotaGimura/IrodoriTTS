@@ -27,11 +27,11 @@ from ..models import (
     ProjectSettings, SpeakerConfig, ScriptItem,
     STATUS_PENDING, STATUS_HTTP_ERROR, STATUS_SERVER_UNAVAILABLE,
     STATUS_VOICE_NOT_FOUND, STATUS_FILE_ERROR, STATUS_TOO_SHORT,
-    STATUS_TOO_LONG, STATUS_MANUAL_NG, STATUS_SUCCESS,
+    STATUS_TOO_LONG, STATUS_MANUAL_NG, STATUS_SUCCESS, STATUS_SKIPPED,
 )
 from ..parser import parse_script
 from ..adapter import IrodoriAdapter
-from ..manifest import save_script_table, save_manifest, load_manifest, restore_statuses_from_manifest
+from ..manifest import save_script_table, save_manifest
 from ..mixer import create_full_mix
 from .preview_tab import PreviewTab
 from .gen_tab import GenTab
@@ -56,6 +56,7 @@ class MainWindow(QMainWindow):
         self._worker: Optional[GenerationWorker] = None
         self._health_worker: Optional[HealthWorker] = None
 
+        self.setAcceptDrops(True)
         self._setup_ui()
         self._connect_signals()
 
@@ -73,6 +74,7 @@ class MainWindow(QMainWindow):
         self.tab_speaker  = self._build_speaker_tab()
         self.preview_tab  = PreviewTab()
         self.gen_tab      = GenTab()
+        self.gen_tab.set_inter_chunk_silence_seconds(self.settings.mix_pause_ms / 1000.0)
 
         self.tabs.addTab(self.tab_project, "⚙ プロジェクト設定")
         self.tabs.addTab(self.tab_speaker, "🎤 話者設定")
@@ -105,7 +107,7 @@ class MainWindow(QMainWindow):
         # 台本 Markdown
         row_script = QHBoxLayout()
         self.ed_script = QLineEdit()
-        self.ed_script.setPlaceholderText("台本 Markdown ファイルを選択…")
+        self.ed_script.setPlaceholderText("台本 Markdown ファイルを選択、または .md / .markdown をドラッグ&ドロップ")
         btn_script = QPushButton("参照")
         btn_script.clicked.connect(self._browse_script)
         row_script.addWidget(self.ed_script)
@@ -122,11 +124,15 @@ class MainWindow(QMainWindow):
         btn_out.clicked.connect(self._browse_output)
         row_out.addWidget(self.ed_output)
         row_out.addWidget(btn_out)
-        form_files.addRow("出力フォルダ:", row_out)
-        btn_open_out = QPushButton("出力フォルダを開く")
+        form_files.addRow("作業用チャンク保存先:", row_out)
+        btn_open_out = QPushButton("作業用保存先を開く")
         btn_open_out.clicked.connect(self._open_output_folder)
         form_files.addRow("", btn_open_out)
-        self.lbl_default_output = QLabel(f"未指定時の保存先: {DEFAULT_OUTPUT_ROOT / 'chunks'}")
+        self.lbl_default_output = QLabel(
+            f"生成中の個別WAVを保存する場所です。未指定時は {DEFAULT_OUTPUT_ROOT / 'chunks'} を使います。"
+            "完成音声は「Export Full Mix」から保存先を選びます。"
+        )
+        self.lbl_default_output.setWordWrap(True)
         self.lbl_default_output.setStyleSheet("color:#666; font-size:11px;")
         form_files.addRow("", self.lbl_default_output)
         outer.addWidget(grp_files)
@@ -184,11 +190,12 @@ class MainWindow(QMainWindow):
         self.sp_chunk_min.setValue(self.settings.chunk_min_chars)
         form_adv.addRow("chunk_min_chars:", self.sp_chunk_min)
 
-        self.sp_pause_ms = QSpinBox()
-        self.sp_pause_ms.setRange(0, 5000)
-        self.sp_pause_ms.setValue(self.settings.mix_pause_ms)
-        self.sp_pause_ms.setSuffix(" ms")
-        form_adv.addRow("台詞間ポーズ:", self.sp_pause_ms)
+        lbl_silence_note = QLabel(
+            "チャンク間の無音は「生成キュー」タブの生成済み音声エリアで調整します。"
+        )
+        lbl_silence_note.setWordWrap(True)
+        lbl_silence_note.setStyleSheet("color:#666; font-size:11px;")
+        form_adv.addRow("チャンク間の無音:", lbl_silence_note)
 
         outer.addWidget(grp_adv)
 
@@ -335,7 +342,7 @@ class MainWindow(QMainWindow):
         s.project_seed    = self.sp_project_seed.value()
         s.seed_mode       = self.cb_seed_mode.currentText()
         s.chunk_min_chars = self.sp_chunk_min.value()
-        s.mix_pause_ms    = self.sp_pause_ms.value()
+        s.mix_pause_ms    = int(round(self.gen_tab.inter_chunk_silence_seconds * 1000))
         s.create_full_mix = self.gen_tab.create_mix
 
         # 話者設定
@@ -353,10 +360,50 @@ class MainWindow(QMainWindow):
     # ==================================================================
     def _browse_script(self):
         path, _ = QFileDialog.getOpenFileName(
-            self, "台本 Markdown を選択", "", "Markdown (*.md);;All files (*)"
+            self, "台本 Markdown を選択", "", "Markdown (*.md *.markdown);;All files (*)"
         )
         if path:
             self.ed_script.setText(path)
+
+    def dragEnterEvent(self, event):
+        if event.mimeData().hasUrls():
+            event.acceptProposedAction()
+        else:
+            event.ignore()
+
+    def dropEvent(self, event):
+        paths = self._markdown_paths_from_drop(event.mimeData())
+        if not paths:
+            QMessageBox.warning(self, "非対応ファイル", ".md / .markdown ファイルをドロップしてください。")
+            return
+        if len(paths) > 1:
+            QMessageBox.information(self, "複数ファイル", "複数ファイルがドロップされたため、最初の1つだけ読み込みます。")
+        if self.items:
+            reply = QMessageBox.question(
+                self,
+                "台本を読み込み直しますか？",
+                "現在の台本状態をリセットして、新しいMarkdownを未生成状態で読み込みます。",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            if reply != QMessageBox.StandardButton.Yes:
+                return
+        self.ed_script.setText(str(paths[0]))
+        self._load_script()
+        event.acceptProposedAction()
+
+    @staticmethod
+    def _markdown_paths_from_drop(mime_data) -> list[Path]:
+        if not mime_data.hasUrls():
+            return []
+        paths: list[Path] = []
+        for url in mime_data.urls():
+            if not url.isLocalFile():
+                continue
+            path = Path(url.toLocalFile())
+            if path.suffix.lower() in {".md", ".markdown"}:
+                paths.append(path)
+        return paths
 
     def _browse_output(self):
         path = QFileDialog.getExistingDirectory(self, "出力フォルダを選択")
@@ -504,13 +551,6 @@ class MainWindow(QMainWindow):
                                 "フォーマット: 「藍：台詞」または「芽瑠：台詞」")
             return
 
-        # 既存 manifest があればステータスを復元
-        if self.settings.output_dir:
-            manifest_path = Path(self.settings.output_dir) / "manifest.json"
-            manifest = load_manifest(manifest_path)
-            if manifest:
-                restore_statuses_from_manifest(self.items, manifest)
-
         self.preview_tab.load_items(self.items)
         self._refresh_generated_audio()
         self.tabs.setCurrentIndex(2)   # プレビュータブへ
@@ -591,7 +631,10 @@ class MainWindow(QMainWindow):
         success_files = [
             str(out_dir / it.file)
             for it in self.items
-            if it.status == STATUS_SUCCESS and it.file
+            if it.status in (STATUS_SUCCESS, STATUS_SKIPPED)
+            and it.file
+            and (out_dir / it.file).exists()
+            and (out_dir / it.file).stat().st_size > 0
         ]
         if not success_files:
             QMessageBox.warning(self, "エラー", "成功した音声ファイルがありません。")

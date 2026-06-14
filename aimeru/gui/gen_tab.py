@@ -5,6 +5,7 @@ AiMeru Voice Studio - 生成キュータブ (Tab 4)
 """
 from __future__ import annotations
 import shutil
+import tempfile
 import wave
 from pathlib import Path
 from typing import List, Callable, Optional
@@ -13,7 +14,7 @@ from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton,
     QCheckBox, QTextEdit, QProgressBar, QLabel, QGroupBox,
     QTableWidget, QTableWidgetItem, QAbstractItemView, QHeaderView,
-    QFileDialog, QMessageBox, QSlider,
+    QFileDialog, QMessageBox, QSlider, QDoubleSpinBox,
 )
 from PySide6.QtCore import Qt, QUrl
 from PySide6.QtGui import QDesktopServices, QFont, QFontDatabase, QTextCursor
@@ -43,6 +44,7 @@ class GenTab(QWidget):
         self._chunks: list[dict] = []
         self._output_dir: Path | None = None
         self._playing_path: Path | None = None
+        self._preview_mix_path: Path | None = None
         self._seeking = False
         self._media_player = None
         self._audio_output = None
@@ -61,8 +63,10 @@ class GenTab(QWidget):
         opt_layout = QHBoxLayout(opt_group)
         self.chk_skip_existing = QCheckBox("既存ファイルをスキップ")
         self.chk_skip_existing.setChecked(True)
-        self.chk_create_mix = QCheckBox("完了後に full_mix.wav を作成")
-        self.chk_create_mix.setChecked(True)
+        self.chk_skip_existing.setToolTip("実際のWAVファイルが存在し、サイズが0より大きい場合だけスキップします。")
+        self.chk_create_mix = QCheckBox("完了後に full_mix.wav を自動作成（任意）")
+        self.chk_create_mix.setChecked(False)
+        self.chk_create_mix.setToolTip("通常は下の「Full Mix Preview」または「Export Full Mix」で確認・保存できます。")
         opt_layout.addWidget(self.chk_skip_existing)
         opt_layout.addSpacing(16)
         opt_layout.addWidget(self.chk_create_mix)
@@ -118,20 +122,26 @@ class GenTab(QWidget):
         action_layout = QHBoxLayout()
         self.btn_select_all_chunks = QPushButton("全選択")
         self.btn_clear_chunks = QPushButton("全解除")
-        self.btn_save_checked = QPushButton("選択した音声を連結して保存")
+        self.btn_preview_mix = QPushButton("Full Mix Preview")
+        self.btn_save_checked = QPushButton("Export Full Mix")
         self.btn_open_selected_file = QPushButton("選択ファイルを開く")
         self.lbl_chunk_summary = QLabel("生成済み: 0 件 / 選択: 0 件")
         self.lbl_chunk_summary.setStyleSheet("color:#666; font-size:11px;")
-        self.lbl_inter_chunk_silence = QLabel(
-            f"チャンク間の無音: {DEFAULT_INTER_CHUNK_SILENCE_SECONDS:.1f}秒"
-        )
-        self.lbl_inter_chunk_silence.setStyleSheet("color:#666; font-size:11px;")
+        self.sp_inter_chunk_silence = QDoubleSpinBox()
+        self.sp_inter_chunk_silence.setRange(0.0, 3.0)
+        self.sp_inter_chunk_silence.setSingleStep(0.1)
+        self.sp_inter_chunk_silence.setDecimals(1)
+        self.sp_inter_chunk_silence.setValue(DEFAULT_INTER_CHUNK_SILENCE_SECONDS)
+        self.sp_inter_chunk_silence.setSuffix(" 秒")
+        self.sp_inter_chunk_silence.setToolTip("Full Mix Preview / Export Full Mix / full_mix.wav 作成に使います。個別チャンクには追加しません。")
         action_layout.addWidget(self.btn_select_all_chunks)
         action_layout.addWidget(self.btn_clear_chunks)
+        action_layout.addWidget(self.btn_preview_mix)
         action_layout.addWidget(self.btn_save_checked)
         action_layout.addWidget(self.btn_open_selected_file)
         action_layout.addStretch()
-        action_layout.addWidget(self.lbl_inter_chunk_silence)
+        action_layout.addWidget(QLabel("チャンク間の無音:"))
+        action_layout.addWidget(self.sp_inter_chunk_silence)
         action_layout.addWidget(self.lbl_chunk_summary)
         generated_layout.addLayout(action_layout)
 
@@ -191,6 +201,7 @@ class GenTab(QWidget):
         self.btn_open_chunks.clicked.connect(lambda: self._on_open_chunks and self._on_open_chunks())
         self.btn_select_all_chunks.clicked.connect(self.select_all_chunks)
         self.btn_clear_chunks.clicked.connect(self.clear_chunk_selection)
+        self.btn_preview_mix.clicked.connect(self.preview_full_mix)
         self.btn_save_checked.clicked.connect(self.save_checked_chunks)
         self.btn_open_selected_file.clicked.connect(self.open_selected_chunk_file)
         self.btn_stop_audio.clicked.connect(self.stop_audio)
@@ -353,6 +364,10 @@ class GenTab(QWidget):
             return
         chunk = self._chunks[row]
         path: Path = chunk["path"]
+        self.play_audio_file(path)
+        self.lbl_now_playing.setText(f"再生中: {path.name}")
+
+    def play_audio_file(self, path: Path):
         if not path.is_file():
             QMessageBox.warning(self, "ファイルが見つかりません", f"WAVファイルが存在しません:\n{path}")
             return
@@ -364,7 +379,6 @@ class GenTab(QWidget):
         self._media_player.setSource(QUrl.fromLocalFile(str(path)))
         self._media_player.play()
         self.btn_stop_audio.setEnabled(True)
-        self.lbl_now_playing.setText(f"再生中: {path.name}")
 
     def stop_audio(self):
         if self._media_player is not None:
@@ -372,6 +386,14 @@ class GenTab(QWidget):
         self._playing_path = None
         self.btn_stop_audio.setEnabled(False)
         self.lbl_now_playing.setText("再生待機中")
+
+    def _cleanup_preview_mix(self):
+        if self._preview_mix_path and self._preview_mix_path.exists():
+            try:
+                self._preview_mix_path.unlink()
+            except OSError:
+                pass
+        self._preview_mix_path = None
 
     def save_checked_chunks(self):
         chunks = self.checked_chunks()
@@ -382,7 +404,7 @@ class GenTab(QWidget):
         default_name = default_dir / "aimeru_merged.wav"
         save_path, _ = QFileDialog.getSaveFileName(
             self,
-            "選択した音声を連結して保存",
+            "Export Full Mix",
             str(default_name),
             "WAV (*.wav)",
         )
@@ -392,13 +414,34 @@ class GenTab(QWidget):
             self._merge_wav_files(
                 [chunk["path"] for chunk in chunks],
                 Path(save_path),
-                silence_seconds=DEFAULT_INTER_CHUNK_SILENCE_SECONDS,
+                silence_seconds=self.inter_chunk_silence_seconds,
             )
         except Exception as exc:
             QMessageBox.critical(self, "保存失敗", str(exc))
             return
         QMessageBox.information(self, "保存完了", f"連結WAVを保存しました:\n{save_path}")
         QDesktopServices.openUrl(QUrl.fromLocalFile(str(Path(save_path).parent)))
+
+    def preview_full_mix(self):
+        chunks = self.checked_chunks()
+        if not chunks:
+            QMessageBox.warning(self, "選択なし", "プレビューする音声をチェックしてください。")
+            return
+        try:
+            self.stop_audio()
+            self._cleanup_preview_mix()
+            with tempfile.NamedTemporaryFile(prefix="aimeru_full_mix_preview_", suffix=".wav", delete=False) as tmp:
+                preview_path = Path(tmp.name)
+            self._merge_wav_files(
+                [chunk["path"] for chunk in chunks],
+                preview_path,
+                silence_seconds=self.inter_chunk_silence_seconds,
+            )
+            self.play_audio_file(preview_path)
+            self._preview_mix_path = preview_path
+            self.lbl_now_playing.setText(f"Full Mix Preview: {preview_path.name}")
+        except Exception as exc:
+            QMessageBox.critical(self, "Preview失敗", str(exc))
 
     def open_selected_chunk_file(self):
         row = self.chunk_table.currentRow()
@@ -548,3 +591,10 @@ class GenTab(QWidget):
     @property
     def create_mix(self) -> bool:
         return self.chk_create_mix.isChecked()
+
+    @property
+    def inter_chunk_silence_seconds(self) -> float:
+        return float(self.sp_inter_chunk_silence.value())
+
+    def set_inter_chunk_silence_seconds(self, seconds: float):
+        self.sp_inter_chunk_silence.setValue(max(0.0, min(3.0, float(seconds))))

@@ -70,7 +70,7 @@ class PreviewTab(QWidget):
         # ヒント行
         hint = QLabel(
             "🖱 クリックで1行選択　／　Shift+クリックで範囲選択　／　"
-            "Cmd（Ctrl）+クリックで複数選択　／　🎵 成功行をダブルクリックで再生"
+            "Cmd（Ctrl）+クリックで複数選択　／　音声再生は「生成キュー」の生成済み音声で行います"
         )
         hint.setStyleSheet("color: #555; font-size: 11px; padding: 2px 0;")
         layout.addWidget(hint)
@@ -125,7 +125,8 @@ class PreviewTab(QWidget):
         play_bar.addWidget(self.btn_stop_play)
 
         # 音量スライダー
-        play_bar.addWidget(QLabel("🔈"))
+        self.lbl_volume_icon = QLabel("🔈")
+        play_bar.addWidget(self.lbl_volume_icon)
         self.slider_volume = QSlider(Qt.Orientation.Horizontal)
         self.slider_volume.setRange(0, 100)
         self.slider_volume.setValue(100)
@@ -139,6 +140,11 @@ class PreviewTab(QWidget):
         play_bar.addWidget(self.lbl_volume)
 
         layout.addLayout(play_bar)
+        self.lbl_now_playing.setVisible(False)
+        self.btn_stop_play.setVisible(False)
+        self.lbl_volume_icon.setVisible(False)
+        self.slider_volume.setVisible(False)
+        self.lbl_volume.setVisible(False)
 
         # ── 下部ボタン行 ────────────────────────────────────
         btn_layout = QHBoxLayout()
@@ -172,38 +178,11 @@ class PreviewTab(QWidget):
     # 再生コントロール
     # ------------------------------------------------------------------
     def _on_double_click(self, item: QTableWidgetItem):
-        row = item.row()
-        if row >= len(self._items):
-            return
-        script_item = self._items[row]
-
-        if script_item.status != STATUS_SUCCESS or not script_item.file:
-            self.lbl_now_playing.setText("⚠ 再生できるのは生成済みの行のみです")
-            return
-
-        p = Path(script_item.file)
-        if not p.is_absolute():
-            main_win = self.window()
-            if hasattr(main_win, 'settings') and main_win.settings.output_dir:
-                p = Path(main_win.settings.output_dir) / p
-
-        if not p.exists():
-            self.lbl_now_playing.setText(f"⚠ ファイルが見つかりません: {p.name}")
-            return
-
-        # 同じファイルを再生中 → 停止
-        if self._player.is_playing() and self._player.current_path == str(p):
-            self._stop_playback()
-            return
-
-        # 再生開始
-        ok = self._player.play(str(p))
-        if ok:
-            self.lbl_now_playing.setText(f"▶ 再生中: {p.name}　（ダブルクリックで停止）")
-            self.btn_stop_play.setEnabled(True)
-            self._poll_timer.start()
-        else:
-            self.lbl_now_playing.setText("⚠ 再生に失敗しました")
+        main_win = self.window()
+        if hasattr(main_win, "statusBar"):
+            main_win.statusBar().showMessage(
+                "音声再生は「生成キュー」タブの生成済み音声エリアで行ってください。"
+            )
 
     def _stop_playback(self):
         self._player.stop()

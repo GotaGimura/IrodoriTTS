@@ -110,6 +110,7 @@ The generation tab shows generated chunk WAV files after a script is loaded or g
 Main behavior:
 
 - If no output folder is selected, generated chunks are saved under `Path.home() / "Downloads" / "chunks"`.
+- The project screen's output field is a working chunk location, not the final master WAV save location.
 - Existing generated chunk WAV files are listed from the current output directory.
 - Every listed chunk is checked by default.
 - Use `全選択` to check all chunks.
@@ -117,13 +118,30 @@ Main behavior:
 - Use `再生` on each row to preview that chunk.
 - The global seek bar shows current playback time and can seek within the playing chunk.
 - Starting another chunk stops the previous playback.
-- Use `選択した音声を連結して保存` to choose a save path and write a merged WAV.
+- Use `Full Mix Preview` to create a temporary WAV and play the selected chunks without choosing a save path.
+- Use `Export Full Mix` to choose a save path and write the official merged WAV.
 - The merge target is only the checked chunks, in table order.
-- Merged WAV files insert 0.5 seconds of silence between chunks.
+- Merged WAV files insert the configured silence duration between chunks. The default is 0.5 seconds.
 - No silence is added after the final chunk.
 - Individual chunk WAV files and individual chunk preview playback are unchanged.
 - Save location is chosen when the button is pressed; the app does not require an output path for merged WAVs before generation.
 - `full_mix.wav` uses the project `mix_pause_ms` setting. New projects default to 500 ms.
+- The optional `完了後に full_mix.wav を自動作成` checkbox is not the primary export path. Prefer `Full Mix Preview` and `Export Full Mix` for deliberate review and saving.
+
+Script state rules:
+
+- Loading a Markdown file creates fresh `未生成` chunks.
+- Showing a chunk in the script preview does not mark it as successful.
+- A chunk becomes `成功` only after WAV generation succeeds.
+- `既存ファイルをスキップ` skips only when the expected WAV file exists and its size is greater than 0.
+- Status alone must not be used as the skip condition.
+
+Markdown drag and drop:
+
+- Drop `.md` or `.markdown` files onto the window to load a script.
+- Non-Markdown files are rejected with a warning.
+- If multiple files are dropped, the first Markdown file is loaded.
+- Loading a dropped file resets chunk state to `未生成`.
 
 Merge safety:
 
@@ -162,3 +180,19 @@ Actual reference audio, generated WAV files, logs, and `.env` files must stay ou
 - `README.md`
 - `C:\Users\koben\Dev\Irodori-TTS\irodori_openai_server.py`
 - `C:\Users\koben\Dev\Irodori-TTS\run_resident_server.bat`
+
+## 11. Future Chunk Editing Notes
+
+Future chunk editing and regeneration should keep enough metadata to decide whether an existing WAV still matches the text:
+
+- `index`
+- `speaker_label`
+- `voice_id`
+- `text`
+- `original_text`
+- `wav_path`
+- `status`
+- `checked`
+- `last_generated_text_hash`
+
+The current implementation does not yet edit chunks in place. Avoid using status alone as proof that a chunk's WAV is valid.

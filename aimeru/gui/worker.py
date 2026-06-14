@@ -167,7 +167,10 @@ class GenerationWorker(QThread):
             success_files = [
                 str(self.output_dir / it.file)
                 for it in self.all_items
-                if it.status == STATUS_SUCCESS and it.file
+                if it.status in (STATUS_SUCCESS, STATUS_SKIPPED)
+                and it.file
+                and (self.output_dir / it.file).exists()
+                and (self.output_dir / it.file).stat().st_size > 0
             ]
             if success_files:
                 self.mix_started.emit()
