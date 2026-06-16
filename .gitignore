@@ -15,13 +15,27 @@ env/
 voice_samples/*.wav
 voice_samples/*.mp3
 voice_samples/*.m4a
+voice_samples/*.aac
 voice_samples/*.flac
+voice_samples/*.ogg
+voice_samples/*.opus
+voice_samples/*.mp4
+voice_samples/*.mov
+voice_samples/*.mkv
+voice_samples/*.webm
 ai.wav
 meru.wav
 *.wav
 *.mp3
 *.m4a
+*.aac
 *.flac
+*.ogg
+*.opus
+*.mp4
+*.mov
+*.mkv
+*.webm
 
 # Generated project outputs
 chunks/
@@ -29,6 +43,8 @@ exports/
 outputs/
 manifest.json
 script_table.json
+.local/
+converted_voice_refs/
 
 # Local test/development files
 test_script.md

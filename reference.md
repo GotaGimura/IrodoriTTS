@@ -57,6 +57,7 @@ If the payload explicitly provides a reference path and that file does not exist
 - `voice_samples/*.wav`, `voice_samples/*.mp3`, and `voice_samples/*.m4a` must not be committed.
 - The only tracked file under `voice_samples` should be `voice_samples/.gitkeep`.
 - Generated files under `outputs/` must not be committed.
+- Converted reference WAV files live under `.local/converted_voice_refs/` and must not be committed.
 
 ## 6. Quality Checklist
 
@@ -81,6 +82,20 @@ Check:
 - `D:\LocalAI\AiMeruVoice\IrodoriTTS\voice_samples\meru.wav` is the correct fallback copy.
 - `curl.exe http://127.0.0.1:8088/debug/runtime` reports `backend_mode` as `resident`.
 - The generation log shows `reference_audio_path` for `meru`.
+
+### Non-WAV reference audio
+
+The speaker reference field accepts these extensions:
+
+```text
+.wav .mp3 .m4a .aac .flac .ogg .opus .mp4 .mov .mkv .webm
+```
+
+- `.wav` files are used directly.
+- Other supported audio/video files are converted with FFmpeg to mono 24 kHz WAV.
+- Converted files are written to `.local/converted_voice_refs/`.
+- If FFmpeg is not available, non-WAV files show a warning and are not used.
+- The original file is never overwritten.
 
 ### GUI path is selected but not reflected
 
@@ -133,8 +148,13 @@ Script state rules:
 - Loading a Markdown file creates fresh `未生成` chunks.
 - Showing a chunk in the script preview does not mark it as successful.
 - A chunk becomes `成功` only after WAV generation succeeds.
-- `既存ファイルをスキップ` skips only when the expected WAV file exists and its size is greater than 0.
+- `既存ファイルをスキップ` skips only when the expected WAV file exists, its size is greater than 0, and `manifest.json` matches the current script id, voice id, text hash, relative WAV path, file size, and successful/skipped status.
 - Status alone must not be used as the skip condition.
+- This prevents a different Markdown script's `001_ai.wav` from being reused by accident.
+
+Future collision reduction:
+
+- A later improvement may store chunks under `chunks/<script_id>/` to reduce same-name collisions between scripts even further.
 
 Markdown drag and drop:
 

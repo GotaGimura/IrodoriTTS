@@ -20,7 +20,7 @@ from PySide6.QtWidgets import (
     QCheckBox, QComboBox, QTableWidget, QTableWidgetItem,
     QHeaderView, QSizePolicy, QStatusBar,
 )
-from PySide6.QtCore import Qt, QThread, QTimer, QUrl
+from PySide6.QtCore import Qt, QThread, QTimer, QUrl, Signal
 from PySide6.QtGui import QDesktopServices, QFont
 
 from ..models import (
@@ -37,12 +37,39 @@ from .preview_tab import PreviewTab
 from .gen_tab import GenTab
 from .worker import GenerationWorker, HealthWorker
 from ..voice_checker import check_voice_file
+from ..reference_audio import (
+    is_supported_reference_audio,
+    prepare_reference_audio,
+)
 
 logger = logging.getLogger(__name__)
 
 APP_TITLE = "AiMeru Voice Studio"
 WINDOW_W, WINDOW_H = 1000, 720
 DEFAULT_OUTPUT_ROOT = Path.home() / "Downloads"
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+
+
+class ReferenceAudioLineEdit(QLineEdit):
+    file_dropped = Signal(str)
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setAcceptDrops(True)
+
+    def dragEnterEvent(self, event):
+        if event.mimeData().hasUrls():
+            event.acceptProposedAction()
+        else:
+            event.ignore()
+
+    def dropEvent(self, event):
+        urls = [url for url in event.mimeData().urls() if url.isLocalFile()]
+        if not urls:
+            event.ignore()
+            return
+        self.file_dropped.emit(urls[0].toLocalFile())
+        event.acceptProposedAction()
 
 
 class MainWindow(QMainWindow):
@@ -272,9 +299,10 @@ class MainWindow(QMainWindow):
 
         # ── 参照音声ファイル ─────────────────────────────────
         row_vf = QHBoxLayout()
-        voice_file_ed = QLineEdit()
-        voice_file_ed.setPlaceholderText("参照音声 WAV ファイルを選択…")
+        voice_file_ed = ReferenceAudioLineEdit()
+        voice_file_ed.setPlaceholderText("参照音声または動画ファイルを選択 / ドロップ…")
         voice_file_ed.textChanged.connect(lambda _text: self._update_reference_payload_hint(speaker_id))
+        voice_file_ed.file_dropped.connect(lambda path: self._set_reference_audio_file(speaker_id, path))
         btn_browse_vf = QPushButton("参照")
         btn_browse_vf.setFixedWidth(56)
         btn_browse_vf.clicked.connect(lambda: self._browse_voice_file(speaker_id))
@@ -297,6 +325,11 @@ class MainWindow(QMainWindow):
         lbl_payload.setStyleSheet("color:#666; font-size:11px; padding:2px 0;")
         form.addRow("payload:", lbl_payload)
 
+        lbl_source = QLabel("")
+        lbl_source.setWordWrap(True)
+        lbl_source.setStyleSheet("color:#666; font-size:11px; padding:2px 0;")
+        form.addRow("source:", lbl_source)
+
         parent_layout.addWidget(grp)
         return {
             "voice": voice_ed,
@@ -305,6 +338,7 @@ class MainWindow(QMainWindow):
             "voice_file": voice_file_ed,
             "check_result": lbl_check_result,
             "payload": lbl_payload,
+            "source": lbl_source,
         }
 
     # ==================================================================
@@ -469,6 +503,12 @@ class MainWindow(QMainWindow):
                     "このまま生成すると別の声へfallbackする可能性があるため、生成を止めました。",
                 )
                 return False
+            if path and Path(path).suffix.lower() != ".wav":
+                self._set_reference_audio_file(speaker_id, path)
+                converted_path = widgets["voice_file"].text().strip()
+                if not converted_path or Path(converted_path).suffix.lower() != ".wav" or not Path(converted_path).is_file():
+                    self.tabs.setCurrentIndex(1)
+                    return False
         return True
 
     def _auto_health_check(self):
@@ -513,13 +553,43 @@ class MainWindow(QMainWindow):
     def _browse_voice_file(self, speaker_id: str):
         """話者の参照音声 WAV ファイルをファイルダイアログで選択する。"""
         path, _ = QFileDialog.getOpenFileName(
-            self, "参照音声 WAV を選択", "", "WAV (*.wav);;All files (*)"
+            self,
+            "参照音声/動画を選択",
+            "",
+            "Supported media (*.wav *.mp3 *.m4a *.aac *.flac *.ogg *.opus *.mp4 *.mov *.mkv *.webm);;All files (*)",
         )
         if not path:
             return
-        widgets = self._ai_widgets if speaker_id == "ai" else self._meru_widgets
-        widgets["voice_file"].setText(path)
-        # 選択直後に自動でチェックを実行
+        self._set_reference_audio_file(speaker_id, path)
+
+    def _set_reference_audio_file(self, speaker_id: str, path: str):
+        source_path = Path(path)
+        widgets = self._speaker_widgets(speaker_id)
+        if not is_supported_reference_audio(source_path):
+            QMessageBox.warning(
+                self,
+                "非対応ファイル",
+                "参照音声として使えるのは .wav/.mp3/.m4a/.aac/.flac/.ogg/.opus/.mp4/.mov/.mkv/.webm です。",
+            )
+            return
+        try:
+            prepared = prepare_reference_audio(source_path, speaker_id, PROJECT_ROOT)
+        except Exception as exc:
+            QMessageBox.warning(self, "参照音声の準備に失敗", str(exc))
+            widgets["source"].setText(f'<span style="color:red">{exc}</span>')
+            return
+        widgets["voice_file"].setText(str(prepared.wav_path))
+        if prepared.converted:
+            widgets["source"].setText(
+                f"元ファイル: {prepared.source_path}<br>"
+                f"変換後WAV: {prepared.wav_path}<br>"
+                f"format: {prepared.format_label}"
+            )
+        else:
+            widgets["source"].setText(
+                f"元ファイル: {prepared.source_path}<br>"
+                "format: wav"
+            )
         self._run_voice_check(speaker_id)
 
     def _run_voice_check(self, speaker_id: str):

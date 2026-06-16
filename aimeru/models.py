@@ -4,6 +4,7 @@ AiMeru Voice Studio - データモデル
 from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Dict, Optional
+import hashlib
 import random
 
 
@@ -88,6 +89,17 @@ class ScriptItem:
         return round(1.0 / self.duration_scale_intent, 6)
 
     @property
+    def text_hash(self) -> str:
+        normalized = "\n".join(
+            [
+                self.speaker_id.strip().lower(),
+                self.voice_id.strip().lower(),
+                " ".join(self.text.split()),
+            ]
+        )
+        return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
+
+    @property
     def char_warning(self) -> str:
         n = self.char_count
         if n >= WARN_RED:
@@ -121,6 +133,10 @@ class ScriptItem:
             "status": self.status,
             "char_count": self.char_count,
             "error_detail": self.error_detail,
+            "speaker_id": self.speaker_id,
+            "speaker_name": self.speaker_name,
+            "voice_id": self.voice_id,
+            "text_hash": self.text_hash,
         }
 
 

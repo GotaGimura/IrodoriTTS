@@ -2,6 +2,7 @@
 AiMeru Voice Studio - manifest.json / script_table.json の読み書き
 """
 from __future__ import annotations
+import hashlib
 import json
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
@@ -10,6 +11,35 @@ from typing import List
 from .models import ProjectSettings, ScriptItem
 
 JST = timezone(timedelta(hours=9))
+
+
+def script_id_from_path(script_path: str) -> str:
+    if not script_path:
+        return ""
+    try:
+        normalized = str(Path(script_path).resolve()).lower()
+    except Exception:
+        normalized = script_path.strip().lower()
+    return hashlib.sha256(normalized.encode("utf-8")).hexdigest()[:16]
+
+
+def _manifest_items(items: List[ScriptItem], output_dir: Path, generated_at: str) -> list[dict]:
+    rows: list[dict] = []
+    for item in items:
+        row = item.to_manifest_dict()
+        row["wav_path"] = item.file
+        row["generated_at"] = generated_at if item.file else ""
+        row["file_size"] = 0
+        if item.file:
+            wav_path = Path(item.file)
+            if not wav_path.is_absolute():
+                wav_path = output_dir / wav_path
+            try:
+                row["file_size"] = wav_path.stat().st_size
+            except OSError:
+                row["file_size"] = 0
+        rows.append(row)
+    return rows
 
 
 # ------------------------------------------------------------------
@@ -34,13 +64,17 @@ def save_manifest(
     path: Path,
     full_mix_path: str = "",
 ) -> None:
+    now = datetime.now(JST).isoformat(timespec="seconds")
+    output_dir = path.parent
     speakers_dict = {
         sid: cfg.to_dict()
         for sid, cfg in settings.speakers.items()
     }
     data = {
         "project_name": settings.project_name,
-        "created_at": datetime.now(JST).isoformat(timespec="seconds"),
+        "created_at": now,
+        "source_script": settings.script_path,
+        "source_script_id": script_id_from_path(settings.script_path),
         "irodori_server": {
             "base_url": settings.server_url,
             "model": settings.model,
@@ -57,7 +91,7 @@ def save_manifest(
             "mix_pause_ms": settings.mix_pause_ms,
         },
         "speakers": speakers_dict,
-        "items": [item.to_manifest_dict() for item in items],
+        "items": _manifest_items(items, output_dir, now),
         "exports": {
             "full_mix_wav": full_mix_path,
         },

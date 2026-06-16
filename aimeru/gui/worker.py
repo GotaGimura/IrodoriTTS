@@ -18,7 +18,7 @@ from ..models import (
     TOO_SHORT_THRESHOLD_SEC, TOO_LONG_THRESHOLD_SEC,
 )
 from ..adapter import IrodoriAdapter
-from ..manifest import save_manifest
+from ..manifest import load_manifest, save_manifest, script_id_from_path
 from ..mixer import create_full_mix, get_wav_duration_seconds
 
 logger = logging.getLogger(__name__)
@@ -69,6 +69,12 @@ class GenerationWorker(QThread):
         self.all_items    = all_items
         self.skip_existing = skip_existing
         self._stop_flag   = False
+        self._manifest = load_manifest(self.output_dir / "manifest.json") or {}
+        self._manifest_items = {
+            int(row.get("index")): row
+            for row in self._manifest.get("items", [])
+            if row.get("index") is not None
+        }
 
     def stop(self):
         self._stop_flag = True
@@ -97,9 +103,9 @@ class GenerationWorker(QThread):
             )
 
             # スキップ判定
-            if self.skip_existing and file_path.exists() and file_path.stat().st_size > 0:
+            if self._can_skip_existing(item, file_path):
                 item.status = STATUS_SKIPPED
-                self.log_message.emit(f"  ⏭ [{item.index:03d}] スキップ（既存）")
+                self.log_message.emit(f"  ⏭ [{item.index:03d}] スキップ（manifest一致）")
                 self.item_done.emit(item.index, STATUS_SKIPPED, "")
                 self._save_manifest()
                 continue
@@ -189,6 +195,37 @@ class GenerationWorker(QThread):
                 self._save_manifest(full_mix=str(mix_path) if ok else "")
 
         self.all_done.emit()
+
+    def _can_skip_existing(self, item: ScriptItem, file_path: Path) -> bool:
+        if not self.skip_existing:
+            return False
+        try:
+            file_size = file_path.stat().st_size
+        except OSError:
+            return False
+        if file_size <= 0:
+            return False
+
+        expected_script_id = script_id_from_path(self.settings.script_path)
+        if self._manifest.get("source_script_id") != expected_script_id:
+            return False
+
+        saved = self._manifest_items.get(item.index)
+        if not saved:
+            return False
+        if saved.get("status") not in (STATUS_SUCCESS, STATUS_SKIPPED):
+            return False
+        if saved.get("voice_id") != item.voice_id:
+            return False
+        if saved.get("text_hash") != item.text_hash:
+            return False
+
+        saved_file = saved.get("file") or saved.get("wav_path")
+        if saved_file != item.file:
+            return False
+        if int(saved.get("file_size") or 0) != file_size:
+            return False
+        return True
 
     # ------------------------------------------------------------------
     def _save_manifest(self, full_mix: str = ""):

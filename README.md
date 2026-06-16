@@ -186,6 +186,9 @@ The output folder is the working chunk location. Final master WAV files are save
 Merged WAV saves use the GUI's `チャンク間の無音` setting, defaulting to 0.5 seconds, with no trailing silence after the final chunk. Individual chunk files and individual preview playback are not modified.
 Loading a Markdown script resets chunks to `未生成`; existing-file skip only applies when the expected WAV file actually exists and has a non-zero size.
 You can drag and drop `.md` / `.markdown` files onto the GUI window to load them.
+Existing-file skip also checks `manifest.json` for the same script id, voice id, text hash, relative WAV path, file size, and successful/skipped status. A same-named WAV from another Markdown script will not be reused.
+Speaker reference fields accept drag-and-drop audio/video files. `.wav` is used directly; `.mp3`, `.m4a`, `.aac`, `.flac`, `.ogg`, `.opus`, `.mp4`, `.mov`, `.mkv`, and `.webm` are converted with FFmpeg into `.local\converted_voice_refs\` before being sent as `reference_audio_path`.
+FFmpeg is optional. Without FFmpeg, non-WAV reference files show a warning; WAV references still work.
 
 The default Hugging Face checkpoint is `Aratako/Irodori-TTS-500M-v3`. Override it if needed:
 
@@ -262,7 +265,17 @@ Ignored examples include:
 voice_samples/*.wav
 voice_samples/*.mp3
 voice_samples/*.m4a
+voice_samples/*.aac
+voice_samples/*.flac
+voice_samples/*.ogg
+voice_samples/*.opus
+voice_samples/*.mp4
+voice_samples/*.mov
+voice_samples/*.mkv
+voice_samples/*.webm
 outputs/
+.local/
+converted_voice_refs/
 *.log
 .env
 .env.*

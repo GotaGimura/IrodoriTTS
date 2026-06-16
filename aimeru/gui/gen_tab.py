@@ -63,7 +63,7 @@ class GenTab(QWidget):
         opt_layout = QHBoxLayout(opt_group)
         self.chk_skip_existing = QCheckBox("既存ファイルをスキップ")
         self.chk_skip_existing.setChecked(True)
-        self.chk_skip_existing.setToolTip("実際のWAVファイルが存在し、サイズが0より大きい場合だけスキップします。")
+        self.chk_skip_existing.setToolTip("WAVが存在し、manifestの台本ID・voice・text hash・ファイルサイズが一致する場合だけスキップします。")
         self.chk_create_mix = QCheckBox("完了後に full_mix.wav を自動作成（任意）")
         self.chk_create_mix.setChecked(False)
         self.chk_create_mix.setToolTip("通常は下の「Full Mix Preview」または「Export Full Mix」で確認・保存できます。")
