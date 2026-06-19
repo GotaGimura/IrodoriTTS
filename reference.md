@@ -125,7 +125,7 @@ The generation tab shows generated chunk WAV files after a script is loaded or g
 Main behavior:
 
 - If no output folder is selected, generated chunks are saved under `Path.home() / "Downloads" / "chunks"`.
-- The project screen's output field is a working chunk location, not the final master WAV save location.
+- The project screen's `作業用チャンク保存先` field is a working chunk location, not the final master WAV save location.
 - Existing generated chunk WAV files are listed from the current output directory.
 - Every listed chunk is checked by default.
 - Use `全選択` to check all chunks.
@@ -133,15 +133,15 @@ Main behavior:
 - Use `再生` on each row to preview that chunk.
 - The global seek bar shows current playback time and can seek within the playing chunk.
 - Starting another chunk stops the previous playback.
-- Use `Full Mix Preview` to create a temporary WAV and play the selected chunks without choosing a save path.
-- Use `Export Full Mix` to choose a save path and write the official merged WAV.
+- Use `通しプレビュー` to create a temporary WAV and play the selected chunks without choosing a save path.
+- Use `完成WAVを書き出し` to choose a save path and write the official merged WAV.
 - The merge target is only the checked chunks, in table order.
 - Merged WAV files insert the configured silence duration between chunks. The default is 0.5 seconds.
 - No silence is added after the final chunk.
 - Individual chunk WAV files and individual chunk preview playback are unchanged.
 - Save location is chosen when the button is pressed; the app does not require an output path for merged WAVs before generation.
 - `full_mix.wav` uses the project `mix_pause_ms` setting. New projects default to 500 ms.
-- The optional `完了後に full_mix.wav を自動作成` checkbox is not the primary export path. Prefer `Full Mix Preview` and `Export Full Mix` for deliberate review and saving.
+- The optional `詳細設定: 生成完了後に自動で full_mix.wav を作成` checkbox is not the primary export path. Prefer `通しプレビュー` and `完成WAVを書き出し` for deliberate review and saving.
 
 Script state rules:
 

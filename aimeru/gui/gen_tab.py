@@ -59,14 +59,14 @@ class GenTab(QWidget):
         layout.setContentsMargins(8, 8, 8, 8)
 
         # ---- オプション ------------------------------------------------
-        opt_group = QGroupBox("生成オプション")
+        opt_group = QGroupBox("生成設定")
         opt_layout = QHBoxLayout(opt_group)
         self.chk_skip_existing = QCheckBox("既存ファイルをスキップ")
         self.chk_skip_existing.setChecked(True)
         self.chk_skip_existing.setToolTip("WAVが存在し、manifestの台本ID・voice・text hash・ファイルサイズが一致する場合だけスキップします。")
-        self.chk_create_mix = QCheckBox("完了後に full_mix.wav を自動作成（任意）")
+        self.chk_create_mix = QCheckBox("詳細設定: 生成完了後に自動で full_mix.wav を作成")
         self.chk_create_mix.setChecked(False)
-        self.chk_create_mix.setToolTip("通常は下の「Full Mix Preview」または「Export Full Mix」で確認・保存できます。")
+        self.chk_create_mix.setToolTip("通常は下の「通しプレビュー」または「完成WAVを書き出し」で確認・保存できます。")
         opt_layout.addWidget(self.chk_skip_existing)
         opt_layout.addSpacing(16)
         opt_layout.addWidget(self.chk_create_mix)
@@ -82,15 +82,17 @@ class GenTab(QWidget):
         self.btn_failed   = QPushButton("↩ 失敗行を再生成")
         self.btn_ng       = QPushButton("↩ 手動NG を再生成")
         self.btn_stop     = QPushButton("⛔ 停止")
-        self.btn_remix    = QPushButton("🎵 full_mix だけ再作成")
-        self.btn_open_out = QPushButton("📂 出力フォルダ")
-        self.btn_open_chunks = QPushButton("📂 chunks")
+        self.btn_remix    = QPushButton("詳細: full_mix.wavを再作成")
+        self.btn_open_out = QPushButton("📂 作業用保存先")
+        self.btn_open_chunks = QPushButton("📂 chunksフォルダ")
 
         self.btn_all.setStyleSheet("background:#4CAF50; color:white; font-weight:bold;")
         self.btn_stop.setStyleSheet("background:#f44336; color:white; font-weight:bold;")
         self.btn_stop.setEnabled(False)
         self.btn_selected.setToolTip("「台本プレビュー」タブで行を選択してからクリック\nCtrl（Mac: Cmd）+ クリックで複数選択")
-        self.btn_open_out.setToolTip("現在の出力フォルダをExplorerで開きます")
+        self.btn_remix.setToolTip("詳細設定用です。通常は下の「完成WAVを書き出し」を使います。")
+        self.btn_remix.setVisible(False)
+        self.btn_open_out.setToolTip("作業用チャンク保存先をExplorerで開きます")
         self.btn_open_chunks.setToolTip("生成された個別WAVの chunks フォルダをExplorerで開きます")
 
         for btn in (self.btn_all, self.btn_selected, self.btn_failed,
@@ -122,9 +124,11 @@ class GenTab(QWidget):
         action_layout = QHBoxLayout()
         self.btn_select_all_chunks = QPushButton("全選択")
         self.btn_clear_chunks = QPushButton("全解除")
-        self.btn_preview_mix = QPushButton("Full Mix Preview")
-        self.btn_save_checked = QPushButton("Export Full Mix")
+        self.btn_preview_mix = QPushButton("通しプレビュー")
+        self.btn_save_checked = QPushButton("完成WAVを書き出し")
         self.btn_open_selected_file = QPushButton("選択ファイルを開く")
+        self.btn_preview_mix.setToolTip("選択したチャンクを一時WAVに連結して再生します。保存はしません。")
+        self.btn_save_checked.setToolTip("選択したチャンクを完成WAVとして保存先を選んで書き出します。")
         self.lbl_chunk_summary = QLabel("生成済み: 0 件 / 選択: 0 件")
         self.lbl_chunk_summary.setStyleSheet("color:#666; font-size:11px;")
         self.sp_inter_chunk_silence = QDoubleSpinBox()
@@ -133,7 +137,7 @@ class GenTab(QWidget):
         self.sp_inter_chunk_silence.setDecimals(1)
         self.sp_inter_chunk_silence.setValue(DEFAULT_INTER_CHUNK_SILENCE_SECONDS)
         self.sp_inter_chunk_silence.setSuffix(" 秒")
-        self.sp_inter_chunk_silence.setToolTip("Full Mix Preview / Export Full Mix / full_mix.wav 作成に使います。個別チャンクには追加しません。")
+        self.sp_inter_chunk_silence.setToolTip("通しプレビュー / 完成WAVを書き出し / full_mix.wav 作成に使います。個別チャンクには追加しません。")
         action_layout.addWidget(self.btn_select_all_chunks)
         action_layout.addWidget(self.btn_clear_chunks)
         action_layout.addWidget(self.btn_preview_mix)
@@ -404,7 +408,7 @@ class GenTab(QWidget):
         default_name = default_dir / "aimeru_merged.wav"
         save_path, _ = QFileDialog.getSaveFileName(
             self,
-            "Export Full Mix",
+            "完成WAVを書き出し",
             str(default_name),
             "WAV (*.wav)",
         )
@@ -419,7 +423,7 @@ class GenTab(QWidget):
         except Exception as exc:
             QMessageBox.critical(self, "保存失敗", str(exc))
             return
-        QMessageBox.information(self, "保存完了", f"連結WAVを保存しました:\n{save_path}")
+        QMessageBox.information(self, "保存完了", f"完成WAVを保存しました:\n{save_path}")
         QDesktopServices.openUrl(QUrl.fromLocalFile(str(Path(save_path).parent)))
 
     def preview_full_mix(self):
@@ -439,9 +443,9 @@ class GenTab(QWidget):
             )
             self.play_audio_file(preview_path)
             self._preview_mix_path = preview_path
-            self.lbl_now_playing.setText(f"Full Mix Preview: {preview_path.name}")
+            self.lbl_now_playing.setText(f"通しプレビュー: {preview_path.name}")
         except Exception as exc:
-            QMessageBox.critical(self, "Preview失敗", str(exc))
+            QMessageBox.critical(self, "通しプレビュー失敗", str(exc))
 
     def open_selected_chunk_file(self):
         row = self.chunk_table.currentRow()

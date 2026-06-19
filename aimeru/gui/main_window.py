@@ -141,7 +141,7 @@ class MainWindow(QMainWindow):
         row_script.addWidget(btn_script)
         form_files.addRow("台本 Markdown:", row_script)
 
-        # 出力フォルダ
+        # 作業用チャンク保存先
         row_out = QHBoxLayout()
         self.ed_output = QLineEdit()
         self.ed_output.setPlaceholderText(
@@ -157,7 +157,7 @@ class MainWindow(QMainWindow):
         form_files.addRow("", btn_open_out)
         self.lbl_default_output = QLabel(
             f"生成中の個別WAVを保存する場所です。未指定時は {DEFAULT_OUTPUT_ROOT / 'chunks'} を使います。"
-            "完成音声は「Export Full Mix」から保存先を選びます。"
+            "完成音声は「完成WAVを書き出し」から保存先を選びます。"
         )
         self.lbl_default_output.setWordWrap(True)
         self.lbl_default_output.setStyleSheet("color:#666; font-size:11px;")
@@ -165,7 +165,7 @@ class MainWindow(QMainWindow):
         outer.addWidget(grp_files)
 
         # ---- サーバー設定 -----------------------------------------------
-        grp_server = QGroupBox("Irodori-TTS-Server")
+        grp_server = QGroupBox("API接続")
         form_server = QFormLayout(grp_server)
         self.ed_server_url = QLineEdit(self.settings.server_url)
         btn_health = QPushButton("接続確認")
@@ -173,17 +173,21 @@ class MainWindow(QMainWindow):
         row_server = QHBoxLayout()
         row_server.addWidget(self.ed_server_url)
         row_server.addWidget(btn_health)
-        form_server.addRow("Server URL:", row_server)
+        form_server.addRow("API URL:", row_server)
         self.lbl_health = QLabel("（未確認）")
         form_server.addRow("", self.lbl_health)
-        self.lbl_api_mode = QLabel(f"API Server: {self.settings.server_url} / Mode: 未確認")
+        self.lbl_api_mode = QLabel(f"API: {self.settings.server_url} / Mode: 未確認")
         self.lbl_api_mode.setStyleSheet("color:#666; font-size:11px;")
         form_server.addRow("", self.lbl_api_mode)
         outer.addWidget(grp_server)
 
         # ---- 詳細パラメータ ---------------------------------------------
-        grp_adv = QGroupBox("詳細パラメータ（推論）")
+        grp_adv = QGroupBox("詳細設定（通常は変更不要）")
         form_adv = QFormLayout(grp_adv)
+        lbl_adv_note = QLabel("生成品質や長文分割を調整する上級者向け設定です。迷ったら初期値のままで大丈夫です。")
+        lbl_adv_note.setWordWrap(True)
+        lbl_adv_note.setStyleSheet("color:#666; font-size:11px;")
+        form_adv.addRow("", lbl_adv_note)
 
         self.sp_num_steps = QSpinBox()
         self.sp_num_steps.setRange(1, 200)
@@ -290,7 +294,7 @@ class MainWindow(QMainWindow):
         speed_lbl = QLineEdit()
         speed_lbl.setReadOnly(True)
         speed_lbl.setStyleSheet("background:#f0f0f0;")
-        form.addRow("server speed（自動）:", speed_lbl)
+        form.addRow("送信速度（自動）:", speed_lbl)
 
         def _update_speed(v):
             speed_lbl.setText(f"{1.0/v:.4f}" if v > 0 else "—")
@@ -323,12 +327,12 @@ class MainWindow(QMainWindow):
         lbl_payload = QLabel("")
         lbl_payload.setWordWrap(True)
         lbl_payload.setStyleSheet("color:#666; font-size:11px; padding:2px 0;")
-        form.addRow("payload:", lbl_payload)
+        form.addRow("実際に送る参照音声:", lbl_payload)
 
         lbl_source = QLabel("")
         lbl_source.setWordWrap(True)
         lbl_source.setStyleSheet("color:#666; font-size:11px; padding:2px 0;")
-        form.addRow("source:", lbl_source)
+        form.addRow("変換情報:", lbl_source)
 
         parent_layout.addWidget(grp)
         return {
@@ -440,7 +444,7 @@ class MainWindow(QMainWindow):
         return paths
 
     def _browse_output(self):
-        path = QFileDialog.getExistingDirectory(self, "出力フォルダを選択")
+        path = QFileDialog.getExistingDirectory(self, "作業用チャンク保存先を選択")
         if path:
             self.ed_output.setText(path)
 
@@ -454,7 +458,7 @@ class MainWindow(QMainWindow):
         self._collect_settings()
         folder = Path(self.settings.output_dir)
         folder.mkdir(parents=True, exist_ok=True)
-        self._open_folder(folder, "出力フォルダ")
+        self._open_folder(folder, "作業用チャンク保存先")
 
     def _open_chunks_folder(self):
         self._collect_settings()
@@ -523,12 +527,12 @@ class MainWindow(QMainWindow):
             self.lbl_health.setText(f"✅ {msg}")
             self.lbl_health.setStyleSheet("color:green;")
             mode = "resident" if "Resident" in msg else "bridge/fallback"
-            self.lbl_api_mode.setText(f"API Server: {self.settings.server_url} / Mode: {mode} / Health: OK")
+            self.lbl_api_mode.setText(f"API: {self.settings.server_url} / Mode: {mode} / Health: OK")
             self.status_bar.showMessage("サーバー接続OK（自動チェック）")
         else:
             self.lbl_health.setText(f"❌ {msg}")
             self.lbl_health.setStyleSheet("color:red;")
-            self.lbl_api_mode.setText(f"API Server: {self.settings.server_url} / Health: NG")
+            self.lbl_api_mode.setText(f"API: {self.settings.server_url} / Health: NG")
             self.status_bar.showMessage("サーバー未応答（自動チェック）— URL を確認してください")
 
     def _check_health(self):
@@ -539,12 +543,12 @@ class MainWindow(QMainWindow):
             self.lbl_health.setText(f"✅ {msg}")
             self.lbl_health.setStyleSheet("color:green;")
             mode = "resident" if "Resident" in msg else "bridge/fallback"
-            self.lbl_api_mode.setText(f"API Server: {self.settings.server_url} / Mode: {mode} / Health: OK")
+            self.lbl_api_mode.setText(f"API: {self.settings.server_url} / Mode: {mode} / Health: OK")
             self.status_bar.showMessage("サーバー接続OK")
         else:
             self.lbl_health.setText(f"❌ {msg}")
             self.lbl_health.setStyleSheet("color:red;")
-            self.lbl_api_mode.setText(f"API Server: {self.settings.server_url} / Health: NG")
+            self.lbl_api_mode.setText(f"API: {self.settings.server_url} / Health: NG")
             self.status_bar.showMessage("サーバー接続失敗")
 
     # ------------------------------------------------------------------

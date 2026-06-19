@@ -2,17 +2,16 @@
 AiMeru Voice Studio - 台本プレビュータブ (Tab 3)
 
 ScriptItem のリストをテーブル表示し、文字数警告とステータスを色分けする。
-成功行をダブルクリックすると再生。音量スライダーあり。
+音声の確認は「生成キュー」の生成済み音声エリアに集約する。
 """
 from __future__ import annotations
-from pathlib import Path
 from typing import List
 
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QTableWidget, QTableWidgetItem,
-    QHeaderView, QLabel, QPushButton, QAbstractItemView, QSlider,
+    QHeaderView, QLabel, QPushButton, QAbstractItemView,
 )
-from PySide6.QtCore import Qt, Signal, QTimer
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QColor, QFont
 
 from ..models import (
@@ -22,7 +21,6 @@ from ..models import (
     STATUS_LABELS,
     WARN_YELLOW, WARN_ORANGE, WARN_RED,
 )
-from ..audio_player import AudioPlayer
 
 # 列インデックス
 COL_NO       = 0
@@ -46,17 +44,10 @@ COLOR_SKIPPED      = QColor("#E9ECEF")
 
 class PreviewTab(QWidget):
     selection_changed = Signal(list)   # 選択された index リスト
-    manual_ng_toggled = Signal(int)    # index
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self._items: List[ScriptItem] = []
-        self._player = AudioPlayer()
-
-        # 再生状態ポーリング（afplay はシグナルを出さないので Timer で監視）
-        self._poll_timer = QTimer(self)
-        self._poll_timer.setInterval(300)
-        self._poll_timer.timeout.connect(self._poll_playback)
 
         self._setup_ui()
 
@@ -109,43 +100,6 @@ class PreviewTab(QWidget):
         self.table.itemDoubleClicked.connect(self._on_double_click)
         layout.addWidget(self.table)
 
-        # ── 再生コントロールバー ──────────────────────────────
-        play_bar = QHBoxLayout()
-
-        # 再生状態ラベル
-        self.lbl_now_playing = QLabel("")
-        self.lbl_now_playing.setStyleSheet("color:#1976D2; font-size:11px;")
-        play_bar.addWidget(self.lbl_now_playing, 1)
-
-        # 停止ボタン
-        self.btn_stop_play = QPushButton("■ 停止")
-        self.btn_stop_play.setFixedWidth(70)
-        self.btn_stop_play.setEnabled(False)
-        self.btn_stop_play.clicked.connect(self._stop_playback)
-        play_bar.addWidget(self.btn_stop_play)
-
-        # 音量スライダー
-        self.lbl_volume_icon = QLabel("🔈")
-        play_bar.addWidget(self.lbl_volume_icon)
-        self.slider_volume = QSlider(Qt.Orientation.Horizontal)
-        self.slider_volume.setRange(0, 100)
-        self.slider_volume.setValue(100)
-        self.slider_volume.setFixedWidth(120)
-        self.slider_volume.setToolTip("音量 (0〜100%)")
-        self.slider_volume.valueChanged.connect(self._on_volume_changed)
-        play_bar.addWidget(self.slider_volume)
-
-        self.lbl_volume = QLabel("100%")
-        self.lbl_volume.setFixedWidth(38)
-        play_bar.addWidget(self.lbl_volume)
-
-        layout.addLayout(play_bar)
-        self.lbl_now_playing.setVisible(False)
-        self.btn_stop_play.setVisible(False)
-        self.lbl_volume_icon.setVisible(False)
-        self.slider_volume.setVisible(False)
-        self.lbl_volume.setVisible(False)
-
         # ── 下部ボタン行 ────────────────────────────────────
         btn_layout = QHBoxLayout()
         self.btn_toggle_ng = QPushButton("選択行を 手動NG / 解除")
@@ -174,33 +128,12 @@ class PreviewTab(QWidget):
                 self._set_row(row, item)
                 break
 
-    # ------------------------------------------------------------------
-    # 再生コントロール
-    # ------------------------------------------------------------------
     def _on_double_click(self, item: QTableWidgetItem):
         main_win = self.window()
         if hasattr(main_win, "statusBar"):
             main_win.statusBar().showMessage(
                 "音声再生は「生成キュー」タブの生成済み音声エリアで行ってください。"
             )
-
-    def _stop_playback(self):
-        self._player.stop()
-        self._poll_timer.stop()
-        self.lbl_now_playing.setText("")
-        self.btn_stop_play.setEnabled(False)
-
-    def _poll_playback(self):
-        """afplay などシグナルがない場合の終了検知（300ms ポーリング）"""
-        if not self._player.is_playing():
-            self._poll_timer.stop()
-            self.lbl_now_playing.setText("")
-            self.btn_stop_play.setEnabled(False)
-
-    def _on_volume_changed(self, value: int):
-        vol = value / 100.0
-        self._player.set_volume(vol)
-        self.lbl_volume.setText(f"{value}%")
 
     # ------------------------------------------------------------------
     # 内部ヘルパー
@@ -262,7 +195,6 @@ class PreviewTab(QWidget):
             item = self._items[row]
             item.status = STATUS_PENDING if item.status == STATUS_MANUAL_NG else STATUS_MANUAL_NG
             self._set_row(row, item)
-            self.manual_ng_toggled.emit(item.index)
 
     def get_selected_items(self) -> List[ScriptItem]:
         rows = set(r.row() for r in self.table.selectedIndexes())

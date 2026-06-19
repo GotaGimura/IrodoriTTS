@@ -181,8 +181,8 @@ For the detailed reference audio rules, see `reference.md`.
 
 The generation tab also includes a generated-audio panel for previewing chunk WAV files, selecting chunks, and saving a merged WAV. See `reference.md` for details.
 If the output folder is left blank, chunk WAV files are saved under the current user's `Downloads\chunks` folder.
-The output folder is the working chunk location. Final master WAV files are saved through `Export Full Mix`.
-`Full Mix Preview` creates a temporary WAV for listening only. `Export Full Mix` writes the official merged WAV.
+The project output field is the working chunk location (`作業用チャンク保存先`). Final master WAV files are saved through `完成WAVを書き出し`.
+`通しプレビュー` creates a temporary WAV for listening only. `完成WAVを書き出し` writes the official merged WAV.
 Merged WAV saves use the GUI's `チャンク間の無音` setting, defaulting to 0.5 seconds, with no trailing silence after the final chunk. Individual chunk files and individual preview playback are not modified.
 Loading a Markdown script resets chunks to `未生成`; existing-file skip only applies when the expected WAV file actually exists and has a non-zero size.
 You can drag and drop `.md` / `.markdown` files onto the GUI window to load them.
